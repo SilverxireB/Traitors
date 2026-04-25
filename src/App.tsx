@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Sun, Upload, Vote } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 
 type Role = "Vampir" | "Koylu" | "Kahin" | "Doktor";
@@ -112,6 +113,7 @@ function App() {
   const [log, setLog] = useState<string[]>(["Oyun hazır."]);
   const botTimers = useRef<number[]>([]);
   const revealTimers = useRef<number[]>([]);
+  const phaseRef = useRef<Phase>("setup");
 
   const gameCode = "VAMP-2026";
   const joinUrl = `${window.location.origin}?room=${gameCode}`;
@@ -127,6 +129,10 @@ function App() {
   useEffect(() => {
     return () => clearTimers();
   }, []);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   function clearTimers() {
     botTimers.current.forEach(window.clearTimeout);
@@ -285,13 +291,14 @@ function App() {
 
   function maybeBeginVoteReveal(sourcePlayers: Player[]) {
     const alive = sourcePlayers.filter((player) => player.alive);
-    if (phase !== "vote" || alive.some((player) => !player.voteDone)) return;
+    if (phaseRef.current !== "vote" || alive.some((player) => !player.voteDone)) return;
     beginVoteReveal(sourcePlayers);
   }
 
   function beginVoteReveal(sourcePlayers: Player[]) {
-    if (phase !== "vote") return;
+    if (phaseRef.current !== "vote") return;
     clearTimers();
+    phaseRef.current = "voteReveal";
     setPhase("voteReveal");
     setRevealStep("countdown");
     setCountdown(10);
@@ -403,8 +410,8 @@ function App() {
         {phase === "lobby" && (
           <Screen title="Oda hazır" subtitle={`${players.length}/${requiredPlayers} oyuncu`}>
             <div className="join-card">
-              <div className="qr" aria-label="QR demo">
-                {Array.from({ length: 25 }).map((_, index) => <span key={index} />)}
+              <div className="qr" aria-label="Oda katılım QR kodu">
+                <QRCodeSVG value={joinUrl} size={108} marginSize={1} bgColor="#fff7ed" fgColor="#130710" />
               </div>
               <div>
                 <small>Oda kodu</small>
@@ -432,7 +439,7 @@ function App() {
         )}
 
         {phase === "night" && (
-          <Screen title="Gece" subtitle="Demo oyuncuları aksiyonlarını seçti.">
+          <Screen title="Gece" subtitle="Oyuncular gizli aksiyonlarını tamamlıyor.">
             <NightSummary players={players} action={nightAction} />
             <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>
           </Screen>

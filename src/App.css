@@ -334,26 +334,18 @@ button.need-choice {
 
 .qr {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
   width: 108px;
   height: 108px;
+  place-items: center;
   padding: 9px;
   border-radius: 16px;
   background: #fff7ed;
 }
 
-.qr span {
-  border-radius: 3px;
-  background: #130710;
-}
-
-.qr span:nth-child(2n) {
-  opacity: 0.18;
-}
-
-.qr span:nth-child(3n) {
-  opacity: 0.72;
+.qr svg {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
 }
 
 .player-list,
