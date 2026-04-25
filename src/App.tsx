@@ -484,6 +484,18 @@ function App() {
     const nextPlayers = players.map((player) =>
       player.id === human.id ? { ...player, voteDone: true, voteTargetId: selectedVoteId } : player,
     );
+    if (!isHost && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "update-player",
+          room: roomCode,
+          player: { ...human, voteDone: true, voteTargetId: selectedVoteId },
+        }),
+      );
+      setVoteNotice("");
+      setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
+      return;
+    }
     setPlayers(nextPlayers);
     setVoteNotice("");
     setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
@@ -776,7 +788,7 @@ function App() {
               ) : (
                 <p className="vote-hint">{winner}</p>
               )}
-              <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>
+              {!isJoinLink && <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>}
             </div>
           </Screen>
         )}
