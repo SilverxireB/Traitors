@@ -94,6 +94,7 @@ function App() {
   const [round, setRound] = useState(1);
   const [nightAction, setNightAction] = useState<NightAction>({});
   const [selectedVoteId, setSelectedVoteId] = useState<string>();
+  const [voteNotice, setVoteNotice] = useState("");
   const [eliminatedId, setEliminatedId] = useState<string>();
   const [joinCopied, setJoinCopied] = useState(false);
   const [log, setLog] = useState<string[]>(["Oyun hazır."]);
@@ -214,6 +215,7 @@ function App() {
 
   function startVoting() {
     setSelectedVoteId(undefined);
+    setVoteNotice("");
     setPlayers((current) =>
       current.map((player) => {
         if (!player.alive) return { ...player, voteDone: false, voteTargetId: undefined };
@@ -227,11 +229,16 @@ function App() {
   }
 
   function confirmHumanVote() {
-    if (!human || !selectedVoteId) return;
+    if (!human) return;
+    if (!selectedVoteId) {
+      setVoteNotice("Önce bir fotoğraf seç.");
+      return;
+    }
     const nextPlayers = players.map((player) =>
       player.id === human.id ? { ...player, voteDone: true, voteTargetId: selectedVoteId } : player,
     );
     setPlayers(nextPlayers);
+    setVoteNotice("");
     setPhase("voteReveal");
     setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
     window.setTimeout(() => resolveVote(nextPlayers), 1800);
@@ -264,6 +271,7 @@ function App() {
     setRound(1);
     setNightAction({});
     setSelectedVoteId(undefined);
+    setVoteNotice("");
     setEliminatedId(undefined);
     setLog(["Oyun hazır."]);
   }
@@ -390,6 +398,7 @@ function App() {
             <button className="button primary bottom" disabled={!selectedVoteId || human.voteDone} onClick={confirmHumanVote}>
               {human.voteDone ? "Oy tamamlandı" : "Oyumu tamamla"}
             </button>
+            {voteNotice && <p className="vote-hint">{voteNotice}</p>}
           </Screen>
         )}
 
