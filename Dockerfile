@@ -35,7 +35,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 # ============================================================
 # Stage 3: Minimal runtime image
 # ============================================================
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN apk add --no-cache ca-certificates tzdata wget
 
