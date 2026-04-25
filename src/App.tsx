@@ -120,6 +120,40 @@ function getVoteTarget(sourcePlayers: Player[]) {
   return sourcePlayers.find((player) => player.id === targetId);
 }
 
+function resizePhoto(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("Lütfen bir fotoğraf seç."));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Fotoğraf okunamadı."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Bu fotoğraf formatı desteklenmedi."));
+      image.onload = () => {
+        const maxSize = 720;
+        const scale = Math.min(maxSize / image.width, maxSize / image.height, 1);
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Fotoğraf işlenemedi."));
+          return;
+        }
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
@@ -131,6 +165,7 @@ function App() {
   const [nightAction, setNightAction] = useState<NightAction>({});
   const [selectedVoteId, setSelectedVoteId] = useState<string>();
   const [voteNotice, setVoteNotice] = useState("");
+  const [photoNotice, setPhotoNotice] = useState("");
   const [revealStep, setRevealStep] = useState<RevealStep>("countdown");
   const [countdown, setCountdown] = useState(10);
   const [eliminatedId, setEliminatedId] = useState<string>();
@@ -180,11 +215,16 @@ function App() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
-  function handlePhotoUpload(file?: File) {
+  async function handlePhotoUpload(file?: File) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setPlayerPhoto(String(reader.result));
-    reader.readAsDataURL(file);
+    setPhotoNotice("Fotoğraf hazırlanıyor...");
+    try {
+      const photo = await resizePhoto(file);
+      setPlayerPhoto(photo);
+      setPhotoNotice("Fotoğraf yüklendi.");
+    } catch (error) {
+      setPhotoNotice(error instanceof Error ? error.message : "Fotoğraf yüklenemedi.");
+    }
   }
 
   function startLobby(withBots: boolean) {
@@ -450,6 +490,7 @@ function App() {
                   Fotoğraf seç
                   <input type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files?.[0])} />
                 </label>
+                {photoNotice && <small className="photo-notice">{photoNotice}</small>}
               </div>
             </div>
 
