@@ -49,9 +49,9 @@ function send(socket, payload) {
   }
 }
 
-function broadcast(room, payload) {
+function broadcast(room, payload, sender) {
   for (const [socket, socketRoom] of clients.entries()) {
-    if (socketRoom === room) send(socket, payload);
+    if (socket !== sender && socketRoom === room) send(socket, payload);
   }
 }
 
@@ -68,7 +68,7 @@ wss.on("connection", (socket) => {
 
     if (message.type === "state") {
       rooms.set(room, message.state);
-      broadcast(room, { type: "state", state: message.state });
+      broadcast(room, { type: "state", state: message.state }, socket);
     }
   });
 

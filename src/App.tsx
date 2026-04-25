@@ -74,6 +74,10 @@ function createId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function createRoomCode() {
+  return `VAMP-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
 function avatarFor(name: string, index: number) {
   return `https://api.dicebear.com/9.x/personas/svg?seed=${encodeURIComponent(name)}-${index}`;
 }
@@ -171,7 +175,10 @@ function filePreview(file: File) {
 }
 
 function App() {
+  const queryRoom = new URLSearchParams(window.location.search).get("room")?.trim().toUpperCase();
   const [phase, setPhase] = useState<Phase>("setup");
+  const [roomCode] = useState(() => queryRoom || createRoomCode());
+  const [hasJoinedRoom, setHasJoinedRoom] = useState(!queryRoom);
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
   const [playerName, setPlayerName] = useState("Ev sahibi");
   const [playerPhoto, setPlayerPhoto] = useState(avatarFor("Ev sahibi", 0));
@@ -192,11 +199,13 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const applyingRemoteRef = useRef(false);
   const playerIdRef = useRef(createId("player"));
-  const queryRoom = new URLSearchParams(window.location.search).get("room");
+  const clientIdRef = useRef(createId("client"));
+  const hasJoinedRoomRef = useRef(!queryRoom);
+  const roomStateRef = useRef<RoomState | null>(null);
 
-  const gameCode = "VAMP-2026";
-  const joinUrl = `${window.location.origin}?room=${gameCode}`;
-  const human = players.find((player) => player.isHuman);
+  const isJoinLink = Boolean(queryRoom);
+  const joinUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+  const human = players.find((player) => player.id === playerIdRef.current);
   const alivePlayers = players.filter((player) => player.alive);
   const eliminated = players.find((player) => player.id === eliminatedId);
   const requiredPlayers = totalPlayers(settings);
@@ -218,13 +227,22 @@ function App() {
     wsRef.current = socket;
 
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "join", room: gameCode }));
+      socket.send(JSON.stringify({ type: "join", room: roomCode, clientId: clientIdRef.current }));
     };
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as { type: "state"; state: RoomState | null };
       if (message.type !== "state" || !message.state) return;
+      roomStateRef.current = message.state;
       applyingRemoteRef.current = true;
+      if (isJoinLink && !hasJoinedRoomRef.current) {
+        setSettings(message.state.settings);
+        setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
+        window.setTimeout(() => {
+          applyingRemoteRef.current = false;
+        }, 0);
+        return;
+      }
       setPlayers((current) => mergeRemotePlayers(current, message.state!.players));
       setPhase(message.state.phase);
       setSettings(message.state.settings);
@@ -240,23 +258,18 @@ function App() {
     };
 
     return () => socket.close();
-  }, []);
+  }, [isJoinLink, roomCode]);
 
   useEffect(() => {
     if (applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
     const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
-    wsRef.current.send(JSON.stringify({ type: "state", room: gameCode, state }));
-  }, [players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log]);
+    roomStateRef.current = state;
+    wsRef.current.send(JSON.stringify({ type: "state", room: roomCode, clientId: clientIdRef.current, state }));
+  }, [players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log, roomCode]);
 
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
-
-  useEffect(() => {
-    if (!queryRoom || queryRoom !== gameCode || players.some((player) => player.id === playerIdRef.current)) return;
-    setPhase("setup");
-    setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
-  }, [players, queryRoom]);
 
   function clearTimers() {
     botTimers.current.forEach(window.clearTimeout);
@@ -311,12 +324,16 @@ function App() {
     });
 
     const nextPlayers = [host, ...bots];
+    hasJoinedRoomRef.current = true;
+    setHasJoinedRoom(true);
     setPlayers(nextPlayers);
     setPhase("lobby");
     setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
   }
 
   function joinRoom() {
+    const remoteState = roomStateRef.current;
+    const basePlayers = remoteState?.players ?? players;
     const joiningPlayer: Player = {
       id: playerIdRef.current,
       name: playerName.trim() || "Oyuncu",
@@ -325,11 +342,14 @@ function App() {
       alive: true,
       voteDone: false,
     };
-    const nextPlayers = players.some((player) => player.id === joiningPlayer.id)
-      ? players
-      : [...players, joiningPlayer];
+    const nextPlayers = basePlayers.some((player) => player.id === joiningPlayer.id)
+      ? basePlayers.map((player) => (player.id === joiningPlayer.id ? joiningPlayer : player))
+      : [...basePlayers, joiningPlayer];
+    hasJoinedRoomRef.current = true;
+    setHasJoinedRoom(true);
     setPlayers(nextPlayers);
-    setPhase("lobby");
+    setSettings(remoteState?.settings ?? settings);
+    setPhase(remoteState && remoteState.phase !== "setup" ? remoteState.phase : "lobby");
     setLog(["Odaya katıldın."]);
   }
 
@@ -541,7 +561,10 @@ function App() {
         )}
 
         {phase === "setup" && (
-          <Screen title="Oyunu kur" subtitle="Oyuncu sayısı, rol dağılımı ve profil.">
+          <Screen
+            title={isJoinLink && !hasJoinedRoom ? "Odaya katıl" : "Oyunu kur"}
+            subtitle={isJoinLink && !hasJoinedRoom ? "İsim ve fotoğrafını gir, canlı odaya bağlan." : "Oyuncu sayısı, rol dağılımı ve profil."}
+          >
             <div className="profile-card">
               <img src={playerPhoto} alt="Profil" />
               <div>
@@ -550,33 +573,44 @@ function App() {
                 <label className="upload-button">
                   <Upload size={17} />
                   Fotoğraf seç
-                  <input type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files?.[0])} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      handlePhotoUpload(event.target.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                  />
                 </label>
                 {photoNotice && <small className="photo-notice">{photoNotice}</small>}
               </div>
             </div>
 
-            <div className="compact-grid">
-              <Counter label="Vampir" value={settings.vampireCount} min={1} max={4} onChange={(value) => updateSetting("vampireCount", value)} />
-              <Counter label="Köylü" value={settings.villagerCount} min={2} max={10} onChange={(value) => updateSetting("villagerCount", value)} />
-            </div>
+            {!isJoinLink && (
+              <>
+                <div className="compact-grid">
+                  <Counter label="Vampir" value={settings.vampireCount} min={1} max={4} onChange={(value) => updateSetting("vampireCount", value)} />
+                  <Counter label="Köylü" value={settings.villagerCount} min={2} max={10} onChange={(value) => updateSetting("villagerCount", value)} />
+                </div>
 
-            <label className="switch">
-              <input type="checkbox" checked={settings.seerEnabled} onChange={(event) => updateSetting("seerEnabled", event.target.checked)} />
-              Kahin
-            </label>
-            <label className="switch">
-              <input type="checkbox" checked={settings.doctorEnabled} onChange={(event) => updateSetting("doctorEnabled", event.target.checked)} />
-              Doktor
-            </label>
+                <label className="switch">
+                  <input type="checkbox" checked={settings.seerEnabled} onChange={(event) => updateSetting("seerEnabled", event.target.checked)} />
+                  Kahin
+                </label>
+                <label className="switch">
+                  <input type="checkbox" checked={settings.doctorEnabled} onChange={(event) => updateSetting("doctorEnabled", event.target.checked)} />
+                  Doktor
+                </label>
+              </>
+            )}
 
             <div className="action-stack">
-              {queryRoom === gameCode ? (
+              {isJoinLink && !hasJoinedRoom ? (
                 <button className="button primary" onClick={joinRoom}>Odaya katıl</button>
               ) : (
                 <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
               )}
-              <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>
+              {!isJoinLink && <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>}
             </div>
           </Screen>
         )}
@@ -589,7 +623,7 @@ function App() {
               </div>
               <div>
                 <small>Oda kodu</small>
-                <strong>{gameCode}</strong>
+                <strong>{roomCode}</strong>
                 <button className="tiny-button" onClick={copyJoinUrl}>{joinCopied ? <Check size={15} /> : <Copy size={15} />} Link</button>
               </div>
             </div>

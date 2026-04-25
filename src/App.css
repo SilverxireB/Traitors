@@ -207,6 +207,7 @@ button.need-choice {
 }
 
 .upload-button {
+  position: relative;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -219,7 +220,12 @@ button.need-choice {
 }
 
 .upload-button input {
-  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .compact-grid {
@@ -746,10 +752,26 @@ button.need-choice {
   }
 
   .profile-card,
-  .join-card,
   .player-row,
   .vote-card {
     grid-template-columns: 76px 1fr;
+  }
+
+  .join-card {
+    grid-template-columns: 112px 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .join-card strong {
+    font-size: 1.15rem;
+    word-break: break-word;
+  }
+
+  .qr {
+    width: 108px;
+    height: 108px;
+    padding: 8px;
   }
 
   .player-row {
