@@ -200,7 +200,7 @@ function App() {
   const queryRoom = new URLSearchParams(window.location.search).get("room")?.trim().toUpperCase();
   const [phase, setPhase] = useState<Phase>("setup");
   const [roomCode] = useState(() => queryRoom || createRoomCode());
-  const [hasJoinedRoom, setHasJoinedRoom] = useState(() => !queryRoom || Boolean(window.localStorage.getItem(storageKey(queryRoom, "playerId"))));
+  const [hasJoinedRoom, setHasJoinedRoom] = useState(() => !queryRoom);
   const [isHost] = useState(() => !queryRoom || window.localStorage.getItem(storageKey(queryRoom, "role")) === "host");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
   const [playerName, setPlayerName] = useState(() => window.localStorage.getItem(storageKey(queryRoom || "draft", "name")) || (queryRoom ? "Oyuncu" : "Ev sahibi"));
@@ -223,7 +223,7 @@ function App() {
   const applyingRemoteRef = useRef(false);
   const playerIdRef = useRef(getOrCreateStoredId(roomCode));
   const clientIdRef = useRef(createId("client"));
-  const hasJoinedRoomRef = useRef(!queryRoom || Boolean(window.localStorage.getItem(storageKey(roomCode, "playerId"))));
+  const hasJoinedRoomRef = useRef(!queryRoom);
   const roomStateRef = useRef<RoomState | null>(null);
 
   const isJoinLink = Boolean(queryRoom);
@@ -292,7 +292,7 @@ function App() {
   }, [isJoinLink, roomCode]);
 
   useEffect(() => {
-    if (!isHost || !hasJoinedRoomRef.current || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (!isHost || !hasJoinedRoomRef.current || players.length === 0 || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
     const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
     roomStateRef.current = state;
     wsRef.current.send(JSON.stringify({ type: "state", room: roomCode, clientId: clientIdRef.current, state }));
