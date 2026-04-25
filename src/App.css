@@ -386,7 +386,8 @@ button.need-choice {
 }
 
 .role-card,
-.announcement {
+.announcement,
+.reveal-panel {
   border-radius: 28px;
   padding: 22px;
   background:
@@ -409,6 +410,50 @@ button.need-choice {
   color: #ffe9d0;
   font-size: 1.1rem;
   line-height: 1.45;
+}
+
+.reveal-panel {
+  display: grid;
+  gap: 14px;
+  place-items: center;
+  min-height: 230px;
+  text-align: center;
+}
+
+.countdown {
+  display: grid;
+  width: 132px;
+  height: 132px;
+  place-items: center;
+  border: 1px solid rgba(245, 199, 111, 0.32);
+  border-radius: 999px;
+  background: rgba(245, 199, 111, 0.1);
+  color: var(--gold);
+  font-size: 4.7rem;
+  font-weight: 950;
+  letter-spacing: -0.08em;
+}
+
+.result-person img {
+  width: min(220px, 72vw);
+  aspect-ratio: 4 / 3;
+  border: 2px solid rgba(255, 244, 230, 0.18);
+  border-radius: 28px;
+  object-fit: cover;
+}
+
+.result-person h2 {
+  margin: 12px 0 4px;
+  font-size: clamp(2rem, 10vw, 3.6rem);
+  letter-spacing: -0.06em;
+}
+
+.role-reveal {
+  color: #ffe9d0;
+}
+
+.role-reveal strong {
+  color: var(--gold);
 }
 
 .night-card {
@@ -458,6 +503,12 @@ button.need-choice {
 .voter-cloud span.done {
   background: rgba(135, 217, 167, 0.18);
   color: #c7f8d9;
+}
+
+.voter-cloud span.voting {
+  border: 1px solid rgba(245, 199, 111, 0.3);
+  background: rgba(245, 199, 111, 0.12);
+  color: #ffe1a2;
 }
 
 .voter-cloud span.pending {

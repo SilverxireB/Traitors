@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Sun, Upload, Vote } from "lucide-react";
 import "./App.css";
 
 type Role = "Vampir" | "Koylu" | "Kahin" | "Doktor";
 type Team = "vampir" | "koy";
 type Phase = "setup" | "lobby" | "roles" | "night" | "day" | "vote" | "voteReveal" | "result" | "gameover";
+type RevealStep = "countdown" | "eliminated" | "role";
 
 type Player = {
   id: string;
@@ -85,6 +86,15 @@ function getWinner(players: Player[]) {
   return undefined;
 }
 
+function getVoteTarget(sourcePlayers: Player[]) {
+  const tallies = sourcePlayers.reduce<Record<string, number>>((acc, player) => {
+    if (player.voteTargetId) acc[player.voteTargetId] = (acc[player.voteTargetId] ?? 0) + 1;
+    return acc;
+  }, {});
+  const [targetId] = Object.entries(tallies).sort((a, b) => b[1] - a[1])[0] ?? [];
+  return sourcePlayers.find((player) => player.id === targetId);
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
@@ -95,9 +105,13 @@ function App() {
   const [nightAction, setNightAction] = useState<NightAction>({});
   const [selectedVoteId, setSelectedVoteId] = useState<string>();
   const [voteNotice, setVoteNotice] = useState("");
+  const [revealStep, setRevealStep] = useState<RevealStep>("countdown");
+  const [countdown, setCountdown] = useState(10);
   const [eliminatedId, setEliminatedId] = useState<string>();
   const [joinCopied, setJoinCopied] = useState(false);
   const [log, setLog] = useState<string[]>(["Oyun hazır."]);
+  const botTimers = useRef<number[]>([]);
+  const revealTimers = useRef<number[]>([]);
 
   const gameCode = "VAMP-2026";
   const joinUrl = `${window.location.origin}?room=${gameCode}`;
@@ -107,15 +121,20 @@ function App() {
   const requiredPlayers = totalPlayers(settings);
   const winner = getWinner(players);
 
-  const voteTallies = useMemo(() => {
-    return players.reduce<Record<string, number>>((acc, player) => {
-      if (player.voteTargetId) acc[player.voteTargetId] = (acc[player.voteTargetId] ?? 0) + 1;
-      return acc;
-    }, {});
-  }, [players]);
-
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
+
+  useEffect(() => {
+    return () => clearTimers();
+  }, []);
+
+  function clearTimers() {
+    botTimers.current.forEach(window.clearTimeout);
+    revealTimers.current.forEach(window.clearTimeout);
+    botTimers.current = [];
+    revealTimers.current = [];
+  }
+
   function updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
   }
@@ -216,16 +235,13 @@ function App() {
   function startVoting() {
     setSelectedVoteId(undefined);
     setVoteNotice("");
+    clearTimers();
     setPlayers((current) =>
-      current.map((player) => {
-        if (!player.alive) return { ...player, voteDone: false, voteTargetId: undefined };
-        if (player.isHuman) return { ...player, voteDone: false, voteTargetId: undefined };
-        const target = pickTarget(current, player.id);
-        return { ...player, voteDone: Boolean(target), voteTargetId: target?.id };
-      }),
+      current.map((player) => ({ ...player, voteDone: false, voteTargetId: undefined })),
     );
     setPhase("vote");
-    setLog((current) => ["Oylama başladı.", ...current]);
+    setLog((current) => ["Oylama başladı. Demo oyuncuları sırayla oy verecek.", ...current]);
+    scheduleBotVotes();
   }
 
   function confirmHumanVote() {
@@ -239,25 +255,74 @@ function App() {
     );
     setPlayers(nextPlayers);
     setVoteNotice("");
-    setPhase("voteReveal");
     setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
-    window.setTimeout(() => resolveVote(nextPlayers), 1800);
+    maybeBeginVoteReveal(nextPlayers);
+  }
+
+  function scheduleBotVotes() {
+    const botVoters = players.filter((player) => player.alive && !player.isHuman);
+    const delayStep = botVoters.length > 1 ? 30000 / (botVoters.length - 1) : 0;
+
+    botVoters.forEach((bot, index) => {
+      const delay = Math.round(1200 + index * delayStep);
+      const timer = window.setTimeout(() => {
+        setPlayers((current) => {
+          const voter = current.find((player) => player.id === bot.id && player.alive && !player.voteDone);
+          if (!voter) return current;
+          const target = pickTarget(current, voter.id);
+          if (!target) return current;
+          setLog((events) => [`${voter.name} oyunu tamamladı.`, ...events]);
+          const nextPlayers = current.map((player) =>
+            player.id === voter.id ? { ...player, voteDone: true, voteTargetId: target.id } : player,
+          );
+          maybeBeginVoteReveal(nextPlayers);
+          return nextPlayers;
+        });
+      }, delay);
+      botTimers.current.push(timer);
+    });
+  }
+
+  function maybeBeginVoteReveal(sourcePlayers: Player[]) {
+    const alive = sourcePlayers.filter((player) => player.alive);
+    if (phase !== "vote" || alive.some((player) => !player.voteDone)) return;
+    beginVoteReveal(sourcePlayers);
+  }
+
+  function beginVoteReveal(sourcePlayers: Player[]) {
+    if (phase !== "vote") return;
+    clearTimers();
+    setPhase("voteReveal");
+    setRevealStep("countdown");
+    setCountdown(10);
+    setLog((current) => ["Herkes oyunu tamamladı. Sayım başladı.", ...current]);
+
+    for (let value = 9; value >= 0; value -= 1) {
+      const timer = window.setTimeout(() => setCountdown(value), (10 - value) * 1000);
+      revealTimers.current.push(timer);
+    }
+
+    const resultTimer = window.setTimeout(() => {
+      const target = getVoteTarget(sourcePlayers);
+      if (!target) return;
+      setEliminatedId(target.id);
+      setRevealStep("eliminated");
+      setLog((current) => [`${target.name} elendi. Rolü birazdan açıklanacak.`, ...current]);
+    }, 10200);
+
+    const roleTimer = window.setTimeout(() => resolveVote(sourcePlayers), 13200);
+    revealTimers.current.push(resultTimer, roleTimer);
   }
 
   function resolveVote(sourcePlayers = players) {
-    const tallies = sourcePlayers.reduce<Record<string, number>>((acc, player) => {
-      if (player.voteTargetId) acc[player.voteTargetId] = (acc[player.voteTargetId] ?? 0) + 1;
-      return acc;
-    }, {});
-    const sorted = Object.entries(tallies).sort((a, b) => b[1] - a[1]);
-    const [targetId] = sorted[0] ?? [];
-    const target = sourcePlayers.find((player) => player.id === targetId);
+    const target = getVoteTarget(sourcePlayers);
     if (!target) return;
     const nextPlayers = sourcePlayers.map((player) => (player.id === target.id ? { ...player, alive: false } : player));
     setPlayers(nextPlayers);
     setEliminatedId(target.id);
+    setRevealStep("role");
     setPhase(getWinner(nextPlayers) ? "gameover" : "result");
-    setLog((current) => [`${target.name} oylamayla elendi.`, ...current]);
+    setLog((current) => [`${target.name} bir ${target.role ?? "oyuncu"} çıktı.`, ...current]);
   }
 
   function nextRound() {
@@ -272,8 +337,11 @@ function App() {
     setNightAction({});
     setSelectedVoteId(undefined);
     setVoteNotice("");
+    setRevealStep("countdown");
+    setCountdown(10);
     setEliminatedId(undefined);
     setLog(["Oyun hazır."]);
+    clearTimers();
   }
 
   async function copyJoinUrl() {
@@ -391,7 +459,7 @@ function App() {
                 >
                   <img src={player.photo} alt={player.name} />
                   <strong>{player.name}</strong>
-                  {voteTallies[player.id] ? <small>{voteTallies[player.id]} oy</small> : <small>Seçilebilir</small>}
+                  <small>Seç</small>
                 </button>
               ))}
             </div>
@@ -403,16 +471,16 @@ function App() {
         )}
 
         {phase === "voteReveal" && (
-          <Screen title="Sonuç geliyor" subtitle="Tüm oylar tamamlandı.">
+          <Screen title="Sonuç geliyor" subtitle={revealStep === "countdown" ? "Oylar sayılıyor." : "Açıklama zamanı."}>
             <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
-            <div className="announcement pulse">Oylar sayılıyor...</div>
+            <RevealPanel step={revealStep} countdown={countdown} eliminated={eliminated} />
           </Screen>
         )}
 
         {(phase === "result" || phase === "gameover") && (
           <Screen title={phase === "gameover" ? "Oyun bitti" : "Sonuç"} subtitle={winner ?? "Tur tamamlandı."}>
-            <div className="announcement">{winner ?? `${eliminated?.name ?? "Kimse"} elendi.`}</div>
-            <PlayerList players={players} />
+            <RevealPanel step="role" countdown={0} eliminated={eliminated} />
+            <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
               {phase !== "gameover" && <button className="button primary" onClick={nextRound}><Sun size={18} /> Sonraki tur</button>}
               <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>
@@ -466,7 +534,7 @@ function Counter({ label, value, min, max, onChange }: { label: string; value: n
   );
 }
 
-function PlayerList({ players, hideRoles }: { players: Player[]; hideRoles?: boolean }) {
+function PlayerList({ players, hideRoles, revealPlayerId }: { players: Player[]; hideRoles?: boolean; revealPlayerId?: string }) {
   return (
     <div className="player-list">
       {players.map((player) => (
@@ -476,7 +544,7 @@ function PlayerList({ players, hideRoles }: { players: Player[]; hideRoles?: boo
             <strong>{player.name}</strong>
             <small>{!player.alive ? "Elendi" : player.isHuman ? "Oyuncu" : "Demo"}</small>
           </div>
-          {!hideRoles && player.role && <span>{player.role}</span>}
+          {player.role && (!hideRoles || player.id === revealPlayerId) && <span>{player.role}</span>}
         </article>
       ))}
     </div>
@@ -490,10 +558,38 @@ function VoteProgress({ done, pending, total }: { done: Player[]; pending: Playe
         <strong>{done.length}/{total}</strong>
         <small>oy tamamlandı</small>
       </div>
+      <small className="vote-caption">Tamamlayanlar yeşil, bekleyenler gri.</small>
       <div className="voter-cloud">
         {done.map((player) => <span className="done" key={player.id}>{player.name}</span>)}
-        {pending.map((player) => <span key={player.id}>{player.name}</span>)}
+        {pending.map((player) => <span className="pending" key={player.id}>{player.name}</span>)}
       </div>
+    </div>
+  );
+}
+
+function RevealPanel({ step, countdown, eliminated }: { step: RevealStep; countdown: number; eliminated?: Player }) {
+  if (step === "countdown") {
+    return (
+      <div className="reveal-panel pulse">
+        <span className="countdown">{countdown}</span>
+        <strong>Oylar sayılıyor</strong>
+      </div>
+    );
+  }
+
+  if (step === "eliminated") {
+    return (
+      <div className="reveal-panel">
+        <strong>{eliminated?.name ?? "Bir oyuncu"} elendi.</strong>
+        <small>Rolü birazdan açıklanacak.</small>
+      </div>
+    );
+  }
+
+  return (
+    <div className="reveal-panel">
+      <strong>{eliminated?.name ?? "Elenen oyuncu"} elendi.</strong>
+      <small>Bu oyuncu bir {eliminated?.role ?? "oyuncu"} idi.</small>
     </div>
   );
 }
