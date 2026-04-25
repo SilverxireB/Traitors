@@ -122,8 +122,37 @@ function trackTimer(room, timer) {
   roomTimers.set(room, timers);
 }
 
+async function readJsonBody(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  if (!chunks.length) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+  if (url.pathname === "/api/room-state" || url.pathname === "/room-state") {
+    const room = url.searchParams.get("room") ?? "VAMP-2026";
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({ type: "state", state: rooms.get(room) ?? null }));
+    return;
+  }
+
+  if (url.pathname === "/api/room-command" && request.method === "POST") {
+    try {
+      const message = await readJsonBody(request);
+      const room = message.room ?? "VAMP-2026";
+      clients.set(response, room);
+      handleCommand(room, message);
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ ok: true, state: rooms.get(room) ?? null }));
+    } catch (error) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Bad request" }));
+    }
+    return;
+  }
+
   const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
   const filePath = join(root, requestedPath);
   const safePath = filePath.startsWith(root) && existsSync(filePath) ? filePath : join(root, "index.html");

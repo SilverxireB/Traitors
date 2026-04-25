@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Upload, Vote } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import heic2any from "heic2any";
@@ -192,6 +192,41 @@ function App() {
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
 
+  const applyRoomState = useCallback((state: RoomState | null) => {
+    if (!state) {
+      hasJoinedRoomRef.current = false;
+      setHasJoinedRoom(false);
+      setPhase("setup");
+      setPlayers([]);
+      setLog([isHost ? "Oda açmak için profilini hazırla." : "Bu oda henüz açılmadı."]);
+      return;
+    }
+    const localPlayer = state.players.find((player) => player.id === playerId);
+    if (localPlayer) {
+      window.localStorage.setItem(storageKey(roomCode, "playerId"), playerId);
+      window.localStorage.setItem(storageKey(roomCode, "name"), localPlayer.name);
+      window.localStorage.setItem(storageKey(roomCode, "photo"), localPlayer.photo);
+    }
+    hasJoinedRoomRef.current = Boolean(localPlayer);
+    setHasJoinedRoom(Boolean(localPlayer));
+    if (!isHost && !localPlayer) {
+      setSettings(state.settings);
+      setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
+      setPhase("setup");
+      setPlayers(state.players);
+      return;
+    }
+    setPlayers(state.players);
+    setPhase(state.phase);
+    setSettings(state.settings);
+    setRound(state.round);
+    setNightAction(state.nightAction);
+    setEliminatedId(state.eliminatedId);
+    setRevealStep(state.revealStep);
+    setCountdown(state.countdown);
+    setLog(state.log);
+  }, [isHost, playerId, roomCode]);
+
   useEffect(() => {
     if (!queryRoom) {
       window.history.replaceState(null, "", `${window.location.pathname}?room=${roomCode}`);
@@ -210,42 +245,24 @@ function App() {
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as { type: "state"; state: RoomState | null };
       if (message.type !== "state") return;
-      if (!message.state) {
-        hasJoinedRoomRef.current = false;
-        setHasJoinedRoom(false);
-        setPhase("setup");
-        setPlayers([]);
-        setLog([isHost ? "Oda açmak için profilini hazırla." : "Bu oda henüz açılmadı."]);
-        return;
-      }
-      const localPlayer = message.state.players.find((player) => player.id === playerId);
-      if (localPlayer) {
-        window.localStorage.setItem(storageKey(roomCode, "playerId"), playerId);
-        window.localStorage.setItem(storageKey(roomCode, "name"), localPlayer.name);
-        window.localStorage.setItem(storageKey(roomCode, "photo"), localPlayer.photo);
-      }
-      hasJoinedRoomRef.current = Boolean(localPlayer);
-      setHasJoinedRoom(Boolean(localPlayer));
-      if (!isHost && !localPlayer) {
-        setSettings(message.state.settings);
-        setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
-        setPhase("setup");
-        setPlayers(message.state.players);
-        return;
-      }
-      setPlayers(message.state.players);
-      setPhase(message.state.phase);
-      setSettings(message.state.settings);
-      setRound(message.state.round);
-      setNightAction(message.state.nightAction);
-      setEliminatedId(message.state.eliminatedId);
-      setRevealStep(message.state.revealStep);
-      setCountdown(message.state.countdown);
-      setLog(message.state.log);
+      applyRoomState(message.state);
     };
 
     return () => socket.close();
-  }, [isHost, playerId, roomCode]);
+  }, [applyRoomState, roomCode]);
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(`/api/room-state?room=${encodeURIComponent(roomCode)}`, { cache: "no-store" });
+        const payload = (await response.json()) as { state: RoomState | null };
+        applyRoomState(payload.state);
+      } catch {
+        // WebSocket remains primary; polling is a quiet fallback for mobile sleep/reconnect.
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [applyRoomState, roomCode]);
 
   function sendCommand(payload: Record<string, unknown>) {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
