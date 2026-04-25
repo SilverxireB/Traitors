@@ -33,6 +33,11 @@ type NightAction = {
   doctorTargetId?: string;
 };
 
+type RoomMessage =
+  | { type: "state"; players: Player[]; phase: Phase; settings: GameSettings; round: number }
+  | { type: "join"; player: Player }
+  | { type: "update"; players: Player[]; phase: Phase; settings: GameSettings; round: number };
+
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
 const initialSettings: GameSettings = {
   vampireCount: 2,
@@ -114,6 +119,9 @@ function App() {
   const botTimers = useRef<number[]>([]);
   const revealTimers = useRef<number[]>([]);
   const phaseRef = useRef<Phase>("setup");
+  const wsRef = useRef<WebSocket | null>(null);
+  const playerIdRef = useRef(createId("player"));
+  const queryRoom = new URLSearchParams(window.location.search).get("room");
 
   const gameCode = "VAMP-2026";
   const joinUrl = `${window.location.origin}?room=${gameCode}`;
@@ -126,13 +134,53 @@ function App() {
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
 
+  function mergeRemotePlayers(localPlayers: Player[], remotePlayers: Player[]) {
+    const localHuman = localPlayers.find((player) => player.id === playerIdRef.current);
+    const withoutLocalDuplicate = remotePlayers.filter((player) => player.id !== playerIdRef.current);
+    return localHuman ? [localHuman, ...withoutLocalDuplicate] : remotePlayers;
+  }
+
+  function broadcastRoom(nextPlayers = players, nextPhase = phase, nextSettings = settings, nextRound = round) {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(
+      JSON.stringify({
+        type: "state",
+        room: gameCode,
+        state: { players: nextPlayers, phase: nextPhase, settings: nextSettings, round: nextRound },
+      }),
+    );
+  }
+
   useEffect(() => {
     return () => clearTimers();
   }, []);
 
   useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws?room=${gameCode}`);
+    wsRef.current = socket;
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data) as RoomMessage;
+      if (message.type !== "state" && message.type !== "update") return;
+      setPlayers((current) => mergeRemotePlayers(current, message.players));
+      setSettings(message.settings);
+      setRound(message.round);
+      if (message.phase !== "setup") setPhase(message.phase);
+    };
+
+    return () => socket.close();
+  }, []);
+
+  useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  useEffect(() => {
+    if (!queryRoom || queryRoom !== gameCode || players.some((player) => player.id === playerIdRef.current)) return;
+    setPhase("setup");
+    setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
+  }, [players, queryRoom]);
 
   function clearTimers() {
     botTimers.current.forEach(window.clearTimeout);
@@ -154,7 +202,7 @@ function App() {
 
   function startLobby(withBots: boolean) {
     const host: Player = {
-      id: createId("player"),
+      id: playerIdRef.current,
       name: playerName.trim() || "Ev sahibi",
       photo: playerPhoto,
       isHuman: true,
@@ -174,9 +222,25 @@ function App() {
       };
     });
 
-    setPlayers([host, ...bots]);
+    const nextPlayers = [host, ...bots];
+    setPlayers(nextPlayers);
     setPhase("lobby");
     setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
+    broadcastRoom(nextPlayers, "lobby", settings, round);
+  }
+
+  function joinRoom() {
+    const joiningPlayer: Player = {
+      id: playerIdRef.current,
+      name: playerName.trim() || "Oyuncu",
+      photo: playerPhoto,
+      isHuman: true,
+      alive: true,
+      voteDone: false,
+    };
+    wsRef.current?.send(JSON.stringify({ type: "join", player: joiningPlayer } satisfies RoomMessage));
+    setPhase("lobby");
+    setLog(["Odaya katıldın."]);
   }
 
   function addDemoBot() {
@@ -197,27 +261,24 @@ function App() {
 
   function assignRoles() {
     const deck = shuffle(roleDeck(settings));
-    setPlayers((current) =>
-      current.map((player, index) => {
+    setPlayers((current) => {
+      const nextPlayers = current.map((player, index) => {
         const role = deck[index] ?? "Koylu";
         return { ...player, role, team: roleMeta[role].team };
-      }),
-    );
+      });
+      broadcastRoom(nextPlayers, "roles", settings, round);
+      return nextPlayers;
+    });
     setPhase("roles");
     setLog((current) => ["Roller dağıtıldı.", ...current]);
   }
 
   function startNight() {
-    const vampires = players.filter((player) => player.alive && player.role === "Vampir");
-    const vampireTarget = pickTarget(
-      players.filter((player) => player.team !== "vampir"),
-      vampires[0]?.id,
-    );
     const seer = players.find((player) => player.alive && player.role === "Kahin");
     const doctor = players.find((player) => player.alive && player.role === "Doktor");
 
     setNightAction({
-      vampireTargetId: vampireTarget?.id,
+      vampireTargetId: undefined,
       seerTargetId: seer ? pickTarget(players, seer.id)?.id : undefined,
       doctorTargetId: doctor ? pickTarget(players)?.id : undefined,
     });
@@ -225,8 +286,14 @@ function App() {
     setLog((current) => ["Gece başladı.", ...current]);
   }
 
+  function chooseVampireTarget(targetId: string) {
+    setNightAction((current) => ({ ...current, vampireTargetId: targetId }));
+    setLog((current) => ["Vampir hedefini seçti.", ...current]);
+  }
+
   function resolveNight() {
-    const target = players.find((player) => player.id === nightAction.vampireTargetId);
+    const fallbackTarget = pickTarget(players.filter((player) => player.team !== "vampir"));
+    const target = players.find((player) => player.id === nightAction.vampireTargetId) ?? fallbackTarget;
     const protectedPlayer = players.find((player) => player.id === nightAction.doctorTargetId);
     const nextPlayers = players.map((player) =>
       target && target.id !== protectedPlayer?.id && player.id === target.id ? { ...player, alive: false } : player,
@@ -245,6 +312,7 @@ function App() {
     setPlayers((current) =>
       current.map((player) => ({ ...player, voteDone: false, voteTargetId: undefined })),
     );
+    phaseRef.current = "vote";
     setPhase("vote");
     setLog((current) => ["Oylama başladı. Demo oyuncuları sırayla oy verecek.", ...current]);
     scheduleBotVotes();
@@ -401,7 +469,11 @@ function App() {
             </label>
 
             <div className="action-stack">
-              <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
+              {queryRoom === gameCode ? (
+                <button className="button primary" onClick={joinRoom}>Odaya katıl</button>
+              ) : (
+                <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
+              )}
               <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>
             </div>
           </Screen>
@@ -440,7 +512,7 @@ function App() {
 
         {phase === "night" && (
           <Screen title="Gece" subtitle="Oyuncular gizli aksiyonlarını tamamlıyor.">
-            <NightSummary players={players} action={nightAction} />
+            <NightSummary human={human} players={players} action={nightAction} onVampireTarget={chooseVampireTarget} />
             <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>
           </Screen>
         )}
@@ -489,7 +561,11 @@ function App() {
             <RevealPanel step="role" countdown={0} eliminated={eliminated} />
             <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
-              {phase !== "gameover" && <button className="button primary" onClick={nextRound}><Sun size={18} /> Sonraki tur</button>}
+              {phase !== "gameover" ? (
+                <button className="button primary" onClick={nextRound}><Sun size={18} /> Sonraki tur</button>
+              ) : (
+                <p className="vote-hint">{winner}</p>
+              )}
               <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>
             </div>
           </Screen>
@@ -601,14 +677,48 @@ function RevealPanel({ step, countdown, eliminated }: { step: RevealStep; countd
   );
 }
 
-function NightSummary({ players, action }: { players: Player[]; action: NightAction }) {
-  const name = (id?: string) => players.find((player) => player.id === id)?.name ?? "Yok";
+function NightSummary({
+  human,
+  players,
+  action,
+  onVampireTarget,
+}: {
+  human?: Player;
+  players: Player[];
+  action: NightAction;
+  onVampireTarget: (targetId: string) => void;
+}) {
+  if (human?.role === "Vampir" && human.alive) {
+    return (
+      <div className="night-card vampire-action">
+        <Moon />
+        <div>
+          <strong>Bu gece hedef seç</strong>
+          <small>Telefonu sakin kullan; diğer oyuncular sadece bekleme ekranı görür.</small>
+        </div>
+        <div className="vote-grid">
+          {players.filter((player) => player.alive && player.team !== "vampir").map((player) => (
+            <button
+              key={player.id}
+              className={`vote-card ${action.vampireTargetId === player.id ? "selected" : ""}`}
+              onClick={() => onVampireTarget(player.id)}
+            >
+              <img src={player.photo} alt={player.name} />
+              <strong>{player.name}</strong>
+              <small>Hedef seç</small>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="night-card">
       <Moon />
       <div>
-        <strong>Gece aksiyonları hazır</strong>
-        <small>Demo görünümü: Vampir {name(action.vampireTargetId)}, Kahin {name(action.seerTargetId)}, Doktor {name(action.doctorTargetId)}</small>
+        <strong>Gece başladı</strong>
+        <small>Gizli aksiyonlar tamamlanırken bekle.</small>
       </div>
     </div>
   );

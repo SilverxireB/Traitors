@@ -387,6 +387,16 @@ button.need-choice {
     rgba(255, 255, 255, 0.055);
 }
 
+.info-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffe9d0;
+}
+
 .role-card span {
   display: block;
   margin-bottom: 10px;
@@ -454,6 +464,11 @@ button.need-choice {
   gap: 12px;
   padding: 16px;
   border-radius: 22px;
+}
+
+.night-choice {
+  display: grid;
+  gap: 12px;
 }
 
 .night-card svg {
