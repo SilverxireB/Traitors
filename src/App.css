@@ -479,6 +479,19 @@ button.need-choice {
   line-height: 1.45;
 }
 
+.vampire-team {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(216, 52, 84, 0.24);
+  border-radius: 22px;
+  padding: 14px;
+  background: rgba(216, 52, 84, 0.11);
+}
+
+.vampire-team strong {
+  color: #ffc8d2;
+}
+
 .reveal-panel {
   display: grid;
   gap: 14px;

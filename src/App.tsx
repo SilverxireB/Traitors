@@ -185,6 +185,7 @@ function App() {
   const winner = getWinner(players);
   const eliminatedPlayers = players.filter((player) => !player.alive);
   const voteRows = getVoteRows(players);
+  const vampireTeam = players.filter((player) => player.role === "Vampir");
 
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
@@ -542,6 +543,7 @@ function App() {
               <span>{human.role}</span>
               <p>{roleMeta[human.role].hint}</p>
             </div>
+            {human.role === "Vampir" && <VampireTeam players={vampireTeam} />}
             <PlayerList players={players} hideRoles />
             <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> İlk oylamayı başlat</button>
           </Screen>
@@ -549,7 +551,7 @@ function App() {
 
         {phase === "night" && (
           <Screen title="Gece" subtitle="Oyuncular gizli aksiyonlarını tamamlıyor.">
-            <NightSummary human={human} players={players} action={nightAction} onVampireTarget={chooseVampireTarget} />
+            <NightSummary human={human} players={players} vampires={vampireTeam} action={nightAction} onVampireTarget={chooseVampireTarget} />
             <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>
           </Screen>
         )}
@@ -722,11 +724,13 @@ function RevealPanel({ step, countdown, eliminated }: { step: RevealStep; countd
 function NightSummary({
   human,
   players,
+  vampires,
   action,
   onVampireTarget,
 }: {
   human?: Player;
   players: Player[];
+  vampires: Player[];
   action: NightAction;
   onVampireTarget: (targetId: string) => void;
 }) {
@@ -738,6 +742,7 @@ function NightSummary({
           <strong>Bu gece hedef seç</strong>
           <small>Telefonu sakin kullan; diğer oyuncular sadece bekleme ekranı görür.</small>
         </div>
+        <VampireTeam players={vampires} compact />
         <div className="vote-grid">
           {players.filter((player) => player.alive && player.team !== "vampir").map((player) => (
             <button
@@ -763,6 +768,19 @@ function NightSummary({
         <small>Gizli aksiyonlar tamamlanırken bekle.</small>
       </div>
     </div>
+  );
+}
+
+function VampireTeam({ players, compact }: { players: Player[]; compact?: boolean }) {
+  return (
+    <section className={`vampire-team ${compact ? "compact" : ""}`}>
+      <strong>Vampir ekibi</strong>
+      <div>
+        {players.map((player) => (
+          <span key={player.id}>{player.name}</span>
+        ))}
+      </div>
+    </section>
   );
 }
 
