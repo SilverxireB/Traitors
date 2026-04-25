@@ -83,8 +83,18 @@ function getWinner(players: Player[]) {
   const aliveVampires = players.filter((player) => player.alive && player.team === "vampir").length;
   const aliveVillage = players.filter((player) => player.alive && player.team === "koy").length;
   if (aliveVampires === 0) return "Köylüler kazandı";
-  if (aliveVampires >= aliveVillage) return "Vampirler kazandı";
+  if (aliveVampires > 0 && aliveVillage <= 1) return "Vampirler kazandı";
   return undefined;
+}
+
+function getVoteRows(players: Player[]) {
+  return players
+    .filter((player) => player.voteTargetId)
+    .map((player) => ({
+      voter: player,
+      target: players.find((target) => target.id === player.voteTargetId),
+    }))
+    .filter((row): row is { voter: Player; target: Player } => Boolean(row.target));
 }
 
 function getVoteTarget(sourcePlayers: Player[]) {
@@ -124,6 +134,8 @@ function App() {
   const eliminated = players.find((player) => player.id === eliminatedId);
   const requiredPlayers = totalPlayers(settings);
   const winner = getWinner(players);
+  const eliminatedPlayers = players.filter((player) => !player.alive);
+  const voteRows = getVoteRows(players);
 
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
@@ -400,6 +412,12 @@ function App() {
           {players.length > 0 && <span className="live-dot">{alivePlayers.length}/{players.length}</span>}
         </header>
 
+        {log[0] && <Log event={log[0]} />}
+
+        {eliminatedPlayers.length > 0 && (
+          <EliminatedStrip players={eliminatedPlayers} />
+        )}
+
         {phase === "setup" && (
           <Screen title="Oyunu kur" subtitle="Oyuncu sayısı, rol dağılımı ve profil.">
             <div className="profile-card">
@@ -517,6 +535,7 @@ function App() {
         {phase === "voteReveal" && (
           <Screen title="Sonuç geliyor" subtitle={revealStep === "countdown" ? "Oylar sayılıyor." : "Açıklama zamanı."}>
             <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
+            {voteRows.length > 0 && <VoteTrace rows={voteRows} />}
             <RevealPanel step={revealStep} countdown={countdown} eliminated={eliminated} />
           </Screen>
         )}
@@ -524,6 +543,7 @@ function App() {
         {(phase === "result" || phase === "gameover") && (
           <Screen title={phase === "gameover" ? "Oyun bitti" : "Sonuç"} subtitle={winner ?? "Tur tamamlandı."}>
             <RevealPanel step="role" countdown={0} eliminated={eliminated} />
+            {voteRows.length > 0 && <VoteTrace rows={voteRows} />}
             <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
               {phase !== "gameover" ? (
@@ -536,7 +556,6 @@ function App() {
           </Screen>
         )}
 
-        <Log events={log} />
       </div>
     </main>
   );
@@ -689,11 +708,44 @@ function NightSummary({
   );
 }
 
-function Log({ events }: { events: string[] }) {
+function EliminatedStrip({ players }: { players: Player[] }) {
+  return (
+    <section className="eliminated-strip" aria-label="Elenen oyuncular">
+      <strong>Elenenler</strong>
+      <div>
+        {players.map((player) => (
+          <article key={player.id}>
+            <img src={player.photo} alt={player.name} />
+            <span>×</span>
+            <small>{player.name}</small>
+            <em>{player.role}</em>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function VoteTrace({ rows }: { rows: Array<{ voter: Player; target: Player }> }) {
+  return (
+    <section className="vote-trace">
+      <strong>Oylar</strong>
+      {rows.map((row, index) => (
+        <div key={`${row.voter.id}-${row.target.id}`} style={{ animationDelay: `${index * 120}ms` }}>
+          <span>{row.voter.name}</span>
+          <b>→</b>
+          <span>{row.target.name}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function Log({ event }: { event: string }) {
   return (
     <aside className="log">
       <Sparkles size={16} />
-      <span>{events[0]}</span>
+      <span>{event}</span>
     </aside>
   );
 }
