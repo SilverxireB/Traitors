@@ -1,0 +1,8 @@
+.git
+.github
+.vscode
+*.md
+LICENSE
+docs/
+frontend/node_modules/
+**/*_test.go

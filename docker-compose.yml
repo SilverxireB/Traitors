@@ -1,0 +1,26 @@
+services:
+  traitors:
+    image: ghcr.io/your-org/traitors:latest
+    container_name: traitors
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - TRAITORS_ENV=production
+      - TRAITORS_PORT=8080
+      - TRAITORS_DB_PATH=/data/traitors.db
+      - TRAITORS_LOG_FORMAT=json
+      - TRAITORS_JWT_SECRET=${TRAITORS_JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
