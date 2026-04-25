@@ -175,6 +175,19 @@ function filePreview(file: File) {
   return URL.createObjectURL(file);
 }
 
+function storageKey(roomCode: string, key: string) {
+  return `vampir:${roomCode}:${key}`;
+}
+
+function getOrCreateStoredId(roomCode: string) {
+  const key = storageKey(roomCode, "playerId");
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const next = createId("player");
+  window.localStorage.setItem(key, next);
+  return next;
+}
+
 async function normalizePhotoFile(file: File) {
   const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
   if (!isHeic) return file;
@@ -187,11 +200,11 @@ function App() {
   const queryRoom = new URLSearchParams(window.location.search).get("room")?.trim().toUpperCase();
   const [phase, setPhase] = useState<Phase>("setup");
   const [roomCode] = useState(() => queryRoom || createRoomCode());
-  const [hasJoinedRoom, setHasJoinedRoom] = useState(!queryRoom);
-  const [isHost] = useState(!queryRoom);
+  const [hasJoinedRoom, setHasJoinedRoom] = useState(() => !queryRoom || Boolean(window.localStorage.getItem(storageKey(queryRoom, "playerId"))));
+  const [isHost] = useState(() => !queryRoom || window.localStorage.getItem(storageKey(queryRoom, "role")) === "host");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
-  const [playerName, setPlayerName] = useState(queryRoom ? "Oyuncu" : "Ev sahibi");
-  const [playerPhoto, setPlayerPhoto] = useState(avatarFor(queryRoom ? "Oyuncu" : "Ev sahibi", 0));
+  const [playerName, setPlayerName] = useState(() => window.localStorage.getItem(storageKey(queryRoom || "draft", "name")) || (queryRoom ? "Oyuncu" : "Ev sahibi"));
+  const [playerPhoto, setPlayerPhoto] = useState(() => window.localStorage.getItem(storageKey(queryRoom || "draft", "photo")) || avatarFor(queryRoom ? "Oyuncu" : "Ev sahibi", 0));
   const [players, setPlayers] = useState<Player[]>([]);
   const [round, setRound] = useState(1);
   const [nightAction, setNightAction] = useState<NightAction>({});
@@ -208,9 +221,9 @@ function App() {
   const phaseRef = useRef<Phase>("setup");
   const wsRef = useRef<WebSocket | null>(null);
   const applyingRemoteRef = useRef(false);
-  const playerIdRef = useRef(createId("player"));
+  const playerIdRef = useRef(getOrCreateStoredId(roomCode));
   const clientIdRef = useRef(createId("client"));
-  const hasJoinedRoomRef = useRef(!queryRoom);
+  const hasJoinedRoomRef = useRef(!queryRoom || Boolean(window.localStorage.getItem(storageKey(roomCode, "playerId"))));
   const roomStateRef = useRef<RoomState | null>(null);
 
   const isJoinLink = Boolean(queryRoom);
@@ -245,9 +258,12 @@ function App() {
       if (message.type !== "state" || !message.state) return;
       roomStateRef.current = message.state;
       const localPlayer = message.state.players.find((player) => player.id === playerIdRef.current);
-      if (isJoinLink && localPlayer && !hasJoinedRoomRef.current) {
+      if (localPlayer && !hasJoinedRoomRef.current) {
         hasJoinedRoomRef.current = true;
         setHasJoinedRoom(true);
+        window.localStorage.setItem(storageKey(roomCode, "playerId"), playerIdRef.current);
+        window.localStorage.setItem(storageKey(roomCode, "name"), localPlayer.name);
+        window.localStorage.setItem(storageKey(roomCode, "photo"), localPlayer.photo);
       }
       applyingRemoteRef.current = true;
       if (isJoinLink && !hasJoinedRoomRef.current) {
@@ -258,7 +274,7 @@ function App() {
         }, 0);
         return;
       }
-      setPlayers((current) => mergeRemotePlayers(current, message.state!.players));
+      setPlayers(message.state.players);
       setPhase(message.state.phase);
       setSettings(message.state.settings);
       setRound(message.state.round);
@@ -297,21 +313,17 @@ function App() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
-  function mergeRemotePlayers(localPlayers: Player[], remotePlayers: Player[]) {
-    const localHuman = localPlayers.find((player) => player.id === playerIdRef.current);
-    const remoteWithoutLocal = remotePlayers.filter((player) => player.id !== playerIdRef.current);
-    return localHuman ? [localHuman, ...remoteWithoutLocal] : remotePlayers;
-  }
-
   async function handlePhotoUpload(file?: File) {
     if (!file) return;
     setPhotoNotice("Fotoğraf hazırlanıyor...");
     const fallbackPreview = filePreview(file);
     setPlayerPhoto(fallbackPreview);
+    window.localStorage.setItem(storageKey(roomCode, "photo"), fallbackPreview);
     try {
       const normalizedFile = await normalizePhotoFile(file);
       const photo = await resizePhoto(normalizedFile);
       setPlayerPhoto(photo);
+      window.localStorage.setItem(storageKey(roomCode, "photo"), photo);
       setPhotoNotice("Fotoğraf yüklendi.");
     } catch (error) {
       setPhotoNotice(error instanceof Error ? `${error.message} Ham önizleme kullanılıyor.` : "Ham önizleme kullanılıyor.");
@@ -341,6 +353,9 @@ function App() {
     });
 
     const nextPlayers = [host, ...bots];
+    window.localStorage.setItem(storageKey(roomCode, "role"), "host");
+    window.localStorage.setItem(storageKey(roomCode, "name"), host.name);
+    window.localStorage.setItem(storageKey(roomCode, "photo"), host.photo);
     hasJoinedRoomRef.current = true;
     setHasJoinedRoom(true);
     setPlayers(nextPlayers);
@@ -362,6 +377,8 @@ function App() {
     };
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "add-player", room: roomCode, player: joiningPlayer }));
+      window.localStorage.setItem(storageKey(roomCode, "name"), joiningPlayer.name);
+      window.localStorage.setItem(storageKey(roomCode, "photo"), joiningPlayer.photo);
       setLog(["Odaya katılma isteği gönderildi."]);
       return;
     }
@@ -369,6 +386,8 @@ function App() {
        ? basePlayers.map((player) => (player.id === joiningPlayer.id ? joiningPlayer : player))
        : [...basePlayers, joiningPlayer];
     hasJoinedRoomRef.current = true;
+    window.localStorage.setItem(storageKey(roomCode, "name"), joiningPlayer.name);
+    window.localStorage.setItem(storageKey(roomCode, "photo"), joiningPlayer.photo);
     setHasJoinedRoom(true);
     setPlayers(nextPlayers);
     setSettings(remoteState?.settings ?? settings);
