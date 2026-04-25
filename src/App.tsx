@@ -34,6 +34,16 @@ type NightAction = {
 };
 
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
+const botSelfies = [
+  "https://randomuser.me/api/portraits/women/44.jpg",
+  "https://randomuser.me/api/portraits/men/32.jpg",
+  "https://randomuser.me/api/portraits/women/68.jpg",
+  "https://randomuser.me/api/portraits/men/75.jpg",
+  "https://randomuser.me/api/portraits/men/46.jpg",
+  "https://randomuser.me/api/portraits/women/12.jpg",
+  "https://randomuser.me/api/portraits/men/22.jpg",
+  "https://randomuser.me/api/portraits/women/90.jpg",
+];
 const initialSettings: GameSettings = {
   vampireCount: 2,
   villagerCount: 4,
@@ -54,6 +64,10 @@ function createId(prefix: string) {
 
 function avatarFor(name: string, index: number) {
   return `https://api.dicebear.com/9.x/personas/svg?seed=${encodeURIComponent(name)}-${index}`;
+}
+
+function botPhotoFor(index: number) {
+  return botSelfies[index % botSelfies.length];
 }
 
 function totalPlayers(settings: GameSettings) {
@@ -112,6 +126,7 @@ function App() {
   const [playerName, setPlayerName] = useState("Ev sahibi");
   const [playerPhoto, setPlayerPhoto] = useState(avatarFor("Ev sahibi", 0));
   const [players, setPlayers] = useState<Player[]>([]);
+  const [demoMode, setDemoMode] = useState(false);
   const [round, setRound] = useState(1);
   const [nightAction, setNightAction] = useState<NightAction>({});
   const [selectedVoteId, setSelectedVoteId] = useState<string>();
@@ -187,7 +202,7 @@ function App() {
       return {
         id: createId("bot"),
         name,
-        photo: avatarFor(name, index + 1),
+        photo: botPhotoFor(index),
         isHuman: false,
         alive: true,
         voteDone: false,
@@ -195,6 +210,7 @@ function App() {
     });
 
     const nextPlayers = [host, ...bots];
+    setDemoMode(withBots);
     setPlayers(nextPlayers);
     setPhase("lobby");
     setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
@@ -225,7 +241,7 @@ function App() {
       {
         id: createId("bot"),
         name,
-        photo: avatarFor(name, current.length),
+        photo: botPhotoFor(current.length - 1),
         isHuman: false,
         alive: true,
         voteDone: false,
@@ -234,7 +250,10 @@ function App() {
   }
 
   function assignRoles() {
-    const deck = shuffle(roleDeck(settings));
+    const baseDeck = roleDeck(settings);
+    const deck = demoMode && baseDeck.includes("Vampir")
+      ? (["Vampir", ...shuffle(baseDeck.filter((role, index) => role !== "Vampir" || index !== baseDeck.indexOf("Vampir")))] as Role[])
+      : shuffle(baseDeck);
     setPlayers((current) => {
       const nextPlayers = current.map((player, index) => {
         const role = deck[index] ?? "Koylu";
@@ -381,6 +400,7 @@ function App() {
   function resetGame() {
     setPhase("setup");
     setPlayers([]);
+    setDemoMode(false);
     setRound(1);
     setNightAction({});
     setSelectedVoteId(undefined);
