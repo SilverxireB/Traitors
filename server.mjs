@@ -66,6 +66,21 @@ wss.on("connection", (socket) => {
       return;
     }
 
+    if (message.type === "add-player" && message.player) {
+      const currentState = rooms.get(room);
+      if (!currentState) {
+        return;
+      }
+      const players = Array.isArray(currentState.players) ? currentState.players : [];
+      const nextPlayers = players.some((player) => player.id === message.player.id)
+        ? players.map((player) => (player.id === message.player.id ? message.player : player))
+        : [...players, message.player];
+      const nextState = { ...currentState, players: nextPlayers };
+      rooms.set(room, nextState);
+      broadcast(room, { type: "state", state: nextState });
+      return;
+    }
+
     if (message.type === "state") {
       rooms.set(room, message.state);
       broadcast(room, { type: "state", state: message.state }, socket);

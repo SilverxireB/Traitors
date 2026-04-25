@@ -180,8 +180,8 @@ function App() {
   const [roomCode] = useState(() => queryRoom || createRoomCode());
   const [hasJoinedRoom, setHasJoinedRoom] = useState(!queryRoom);
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
-  const [playerName, setPlayerName] = useState("Ev sahibi");
-  const [playerPhoto, setPlayerPhoto] = useState(avatarFor("Ev sahibi", 0));
+  const [playerName, setPlayerName] = useState(queryRoom ? "Oyuncu" : "Ev sahibi");
+  const [playerPhoto, setPlayerPhoto] = useState(avatarFor(queryRoom ? "Oyuncu" : "Ev sahibi", 0));
   const [players, setPlayers] = useState<Player[]>([]);
   const [round, setRound] = useState(1);
   const [nightAction, setNightAction] = useState<NightAction>({});
@@ -261,7 +261,7 @@ function App() {
   }, [isJoinLink, roomCode]);
 
   useEffect(() => {
-    if (applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (!hasJoinedRoomRef.current || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
     const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
     roomStateRef.current = state;
     wsRef.current.send(JSON.stringify({ type: "state", room: roomCode, clientId: clientIdRef.current, state }));
@@ -291,13 +291,14 @@ function App() {
   async function handlePhotoUpload(file?: File) {
     if (!file) return;
     setPhotoNotice("Fotoğraf hazırlanıyor...");
+    const fallbackPreview = filePreview(file);
+    setPlayerPhoto(fallbackPreview);
     try {
       const photo = await resizePhoto(file);
       setPlayerPhoto(photo);
       setPhotoNotice("Fotoğraf yüklendi.");
     } catch (error) {
-      setPlayerPhoto(filePreview(file));
-      setPhotoNotice(error instanceof Error ? `${error.message} Ham önizleme denendi.` : "Ham önizleme denendi.");
+      setPhotoNotice(error instanceof Error ? `${error.message} Ham önizleme kullanılıyor.` : "Ham önizleme kullanılıyor.");
     }
   }
 
@@ -334,17 +335,23 @@ function App() {
   function joinRoom() {
     const remoteState = roomStateRef.current;
     const basePlayers = remoteState?.players ?? players;
+    const guestNumber = basePlayers.filter((player) => player.isHuman).length + 1;
     const joiningPlayer: Player = {
       id: playerIdRef.current,
-      name: playerName.trim() || "Oyuncu",
+      name: playerName.trim() && playerName.trim() !== "Ev sahibi" ? playerName.trim() : `Oyuncu ${guestNumber}`,
       photo: playerPhoto,
       isHuman: true,
       alive: true,
       voteDone: false,
     };
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "add-player", room: roomCode, player: joiningPlayer }));
+      setLog(["Odaya katılma isteği gönderildi."]);
+      return;
+    }
     const nextPlayers = basePlayers.some((player) => player.id === joiningPlayer.id)
-      ? basePlayers.map((player) => (player.id === joiningPlayer.id ? joiningPlayer : player))
-      : [...basePlayers, joiningPlayer];
+       ? basePlayers.map((player) => (player.id === joiningPlayer.id ? joiningPlayer : player))
+       : [...basePlayers, joiningPlayer];
     hasJoinedRoomRef.current = true;
     setHasJoinedRoom(true);
     setPlayers(nextPlayers);
