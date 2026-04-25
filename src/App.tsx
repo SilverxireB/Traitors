@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Sun, Upload, Vote } from "lucide-react";
+import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Upload, Vote } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 
@@ -467,7 +467,7 @@ function App() {
               <p>{roleMeta[human.role].hint}</p>
             </div>
             <PlayerList players={players} hideRoles />
-            <button className="button primary bottom" onClick={startNight}><Moon size={18} /> Geceye geç</button>
+            <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> İlk oylamayı başlat</button>
           </Screen>
         )}
 
@@ -480,7 +480,11 @@ function App() {
 
         {phase === "day" && (
           <Screen title="Gündüz" subtitle="Konuşma zamanı.">
-            <div className="announcement">{eliminated ? `${eliminated.name} bu gece elendi.` : "Bu gece kimse elenmedi."}</div>
+            <div className="announcement">
+              {eliminated
+                ? `${eliminated.name} bu gece elendi. Bu oyuncu bir ${eliminated.role ?? "oyuncu"} idi.`
+                : "Bu gece kimse elenmedi."}
+            </div>
             <PlayerList players={players} hideRoles />
             <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> Oylamaya geç</button>
           </Screen>
@@ -523,7 +527,7 @@ function App() {
             <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
               {phase !== "gameover" ? (
-                <button className="button primary" onClick={nextRound}><Sun size={18} /> Sonraki tur</button>
+                <button className="button primary" onClick={nextRound}><Moon size={18} /> Geceye geç</button>
               ) : (
                 <p className="vote-hint">{winner}</p>
               )}
