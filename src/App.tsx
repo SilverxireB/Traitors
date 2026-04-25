@@ -33,15 +33,6 @@ type NightAction = {
   doctorTargetId?: string;
 };
 
-type RoomState = {
-  players: Player[];
-  phase: Phase;
-  settings: GameSettings;
-  round: number;
-};
-
-type RoomMessage = { type: "state"; state: RoomState | null };
-
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
 const initialSettings: GameSettings = {
   vampireCount: 2,
@@ -123,7 +114,6 @@ function App() {
   const botTimers = useRef<number[]>([]);
   const revealTimers = useRef<number[]>([]);
   const phaseRef = useRef<Phase>("setup");
-  const wsRef = useRef<WebSocket | null>(null);
   const playerIdRef = useRef(createId("player"));
   const queryRoom = new URLSearchParams(window.location.search).get("room");
 
@@ -138,46 +128,8 @@ function App() {
   const votersDone = players.filter((player) => player.alive && player.voteDone);
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
 
-  function mergeRemotePlayers(localPlayers: Player[], remotePlayers: Player[]) {
-    const localHuman = localPlayers.find((player) => player.id === playerIdRef.current);
-    const withoutLocalDuplicate = remotePlayers.filter((player) => player.id !== playerIdRef.current);
-    return localHuman ? [localHuman, ...withoutLocalDuplicate] : remotePlayers;
-  }
-
-  function broadcastRoom(nextPlayers = players, nextPhase = phase, nextSettings = settings, nextRound = round) {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(
-      JSON.stringify({
-        type: "state",
-        room: gameCode,
-        state: { players: nextPlayers, phase: nextPhase, settings: nextSettings, round: nextRound },
-      }),
-    );
-  }
-
   useEffect(() => {
     return () => clearTimers();
-  }, []);
-
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/room-ws`);
-    wsRef.current = socket;
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "join", room: gameCode }));
-    };
-
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data) as RoomMessage;
-      if (message.type !== "state" || !message.state) return;
-      setPlayers((current) => mergeRemotePlayers(current, message.state!.players));
-      setSettings(message.state.settings);
-      setRound(message.state.round);
-      if (message.state.phase !== "setup") setPhase(message.state.phase);
-    };
-
-    return () => socket.close();
   }, []);
 
   useEffect(() => {
@@ -234,7 +186,6 @@ function App() {
     setPlayers(nextPlayers);
     setPhase("lobby");
     setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
-    broadcastRoom(nextPlayers, "lobby", settings, round);
   }
 
   function joinRoom() {
@@ -246,9 +197,10 @@ function App() {
       alive: true,
       voteDone: false,
     };
-    const nextPlayers = mergeRemotePlayers(players, [...players, joiningPlayer]);
+    const nextPlayers = players.some((player) => player.id === joiningPlayer.id)
+      ? players
+      : [...players, joiningPlayer];
     setPlayers(nextPlayers);
-    broadcastRoom(nextPlayers, "lobby", settings, round);
     setPhase("lobby");
     setLog(["Odaya katıldın."]);
   }
@@ -276,7 +228,6 @@ function App() {
         const role = deck[index] ?? "Koylu";
         return { ...player, role, team: roleMeta[role].team };
       });
-      broadcastRoom(nextPlayers, "roles", settings, round);
       return nextPlayers;
     });
     setPhase("roles");
