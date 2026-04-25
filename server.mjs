@@ -81,6 +81,28 @@ wss.on("connection", (socket) => {
       return;
     }
 
+    if (message.type === "update-player" && message.player) {
+      const currentState = rooms.get(room);
+      if (!currentState) return;
+      const players = Array.isArray(currentState.players) ? currentState.players : [];
+      const nextPlayers = players.map((player) =>
+        player.id === message.player.id ? { ...player, ...message.player } : player,
+      );
+      const nextState = { ...currentState, players: nextPlayers };
+      rooms.set(room, nextState);
+      broadcast(room, { type: "state", state: nextState });
+      return;
+    }
+
+    if (message.type === "night-action" && message.nightAction) {
+      const currentState = rooms.get(room);
+      if (!currentState) return;
+      const nextState = { ...currentState, nightAction: { ...currentState.nightAction, ...message.nightAction } };
+      rooms.set(room, nextState);
+      broadcast(room, { type: "state", state: nextState });
+      return;
+    }
+
     if (message.type === "state") {
       rooms.set(room, message.state);
       broadcast(room, { type: "state", state: message.state }, socket);

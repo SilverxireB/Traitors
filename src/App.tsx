@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Upload, Vote } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import heic2any from "heic2any";
 import "./App.css";
 
 type Role = "Vampir" | "Koylu" | "Kahin" | "Doktor";
@@ -138,7 +139,7 @@ function getVoteTarget(sourcePlayers: Player[]) {
 
 function resizePhoto(file: File) {
   return new Promise<string>((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
+    if (file.type && !file.type.startsWith("image/")) {
       reject(new Error("Lütfen bir fotoğraf seç."));
       return;
     }
@@ -172,6 +173,14 @@ function resizePhoto(file: File) {
 
 function filePreview(file: File) {
   return URL.createObjectURL(file);
+}
+
+async function normalizePhotoFile(file: File) {
+  const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+  if (!isHeic) return file;
+  const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.82 });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
 }
 
 function App() {
@@ -294,7 +303,8 @@ function App() {
     const fallbackPreview = filePreview(file);
     setPlayerPhoto(fallbackPreview);
     try {
-      const photo = await resizePhoto(file);
+      const normalizedFile = await normalizePhotoFile(file);
+      const photo = await resizePhoto(normalizedFile);
       setPlayerPhoto(photo);
       setPhotoNotice("Fotoğraf yüklendi.");
     } catch (error) {
