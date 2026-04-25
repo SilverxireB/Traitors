@@ -46,17 +46,6 @@ type RoomState = {
   log: string[];
 };
 
-const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
-const botSelfies = [
-  "https://randomuser.me/api/portraits/women/44.jpg",
-  "https://randomuser.me/api/portraits/men/32.jpg",
-  "https://randomuser.me/api/portraits/women/68.jpg",
-  "https://randomuser.me/api/portraits/men/75.jpg",
-  "https://randomuser.me/api/portraits/men/46.jpg",
-  "https://randomuser.me/api/portraits/women/12.jpg",
-  "https://randomuser.me/api/portraits/men/22.jpg",
-  "https://randomuser.me/api/portraits/women/90.jpg",
-];
 const initialSettings: GameSettings = {
   vampireCount: 2,
   villagerCount: 4,
@@ -83,30 +72,8 @@ function avatarFor(name: string, index: number) {
   return `https://api.dicebear.com/9.x/personas/svg?seed=${encodeURIComponent(name)}-${index}`;
 }
 
-function botPhotoFor(index: number) {
-  return botSelfies[index % botSelfies.length];
-}
-
 function totalPlayers(settings: GameSettings) {
   return settings.vampireCount + settings.villagerCount + Number(settings.seerEnabled) + Number(settings.doctorEnabled);
-}
-
-function roleDeck(settings: GameSettings): Role[] {
-  return [
-    ...Array.from({ length: settings.vampireCount }, () => "Vampir" as const),
-    ...Array.from({ length: settings.villagerCount }, () => "Koylu" as const),
-    ...(settings.seerEnabled ? (["Kahin"] as const) : []),
-    ...(settings.doctorEnabled ? (["Doktor"] as const) : []),
-  ];
-}
-
-function shuffle<T>(items: T[]) {
-  return [...items].sort(() => Math.random() - 0.5);
-}
-
-function pickTarget(players: Player[], avoidId?: string) {
-  const options = players.filter((player) => player.alive && player.id !== avoidId);
-  return options[Math.floor(Math.random() * options.length)];
 }
 
 function getWinner(players: Player[]) {
@@ -126,15 +93,6 @@ function getVoteRows(players: Player[]) {
       target: players.find((target) => target.id === player.voteTargetId),
     }))
     .filter((row): row is { voter: Player; target: Player } => Boolean(row.target));
-}
-
-function getVoteTarget(sourcePlayers: Player[]) {
-  const tallies = sourcePlayers.reduce<Record<string, number>>((acc, player) => {
-    if (player.voteTargetId) acc[player.voteTargetId] = (acc[player.voteTargetId] ?? 0) + 1;
-    return acc;
-  }, {});
-  const [targetId] = Object.entries(tallies).sort((a, b) => b[1] - a[1])[0] ?? [];
-  return sourcePlayers.find((player) => player.id === targetId);
 }
 
 function resizePhoto(file: File) {
@@ -216,19 +174,13 @@ function App() {
   const [eliminatedId, setEliminatedId] = useState<string>();
   const [joinCopied, setJoinCopied] = useState(false);
   const [log, setLog] = useState<string[]>(["Oyun hazır."]);
-  const botTimers = useRef<number[]>([]);
-  const revealTimers = useRef<number[]>([]);
-  const phaseRef = useRef<Phase>("setup");
   const wsRef = useRef<WebSocket | null>(null);
-  const applyingRemoteRef = useRef(false);
-  const playerIdRef = useRef(getOrCreateStoredId(roomCode));
+  const [playerId] = useState(() => getOrCreateStoredId(roomCode));
   const clientIdRef = useRef(createId("client"));
   const hasJoinedRoomRef = useRef(!queryRoom);
-  const roomStateRef = useRef<RoomState | null>(null);
 
-  const isJoinLink = Boolean(queryRoom);
   const joinUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-  const human = players.find((player) => player.id === playerIdRef.current);
+  const human = players.find((player) => player.id === playerId);
   const alivePlayers = players.filter((player) => player.alive);
   const eliminated = players.find((player) => player.id === eliminatedId);
   const requiredPlayers = totalPlayers(settings);
@@ -241,8 +193,10 @@ function App() {
   const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
 
   useEffect(() => {
-    return () => clearTimers();
-  }, []);
+    if (!queryRoom) {
+      window.history.replaceState(null, "", `${window.location.pathname}?room=${roomCode}`);
+    }
+  }, [queryRoom, roomCode]);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -255,23 +209,28 @@ function App() {
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as { type: "state"; state: RoomState | null };
-      if (message.type !== "state" || !message.state) return;
-      roomStateRef.current = message.state;
-      const localPlayer = message.state.players.find((player) => player.id === playerIdRef.current);
-      if (localPlayer && !hasJoinedRoomRef.current) {
-        hasJoinedRoomRef.current = true;
-        setHasJoinedRoom(true);
-        window.localStorage.setItem(storageKey(roomCode, "playerId"), playerIdRef.current);
+      if (message.type !== "state") return;
+      if (!message.state) {
+        hasJoinedRoomRef.current = false;
+        setHasJoinedRoom(false);
+        setPhase("setup");
+        setPlayers([]);
+        setLog([isHost ? "Oda açmak için profilini hazırla." : "Bu oda henüz açılmadı."]);
+        return;
+      }
+      const localPlayer = message.state.players.find((player) => player.id === playerId);
+      if (localPlayer) {
+        window.localStorage.setItem(storageKey(roomCode, "playerId"), playerId);
         window.localStorage.setItem(storageKey(roomCode, "name"), localPlayer.name);
         window.localStorage.setItem(storageKey(roomCode, "photo"), localPlayer.photo);
       }
-      applyingRemoteRef.current = true;
-      if (isJoinLink && !hasJoinedRoomRef.current) {
+      hasJoinedRoomRef.current = Boolean(localPlayer);
+      setHasJoinedRoom(Boolean(localPlayer));
+      if (!isHost && !localPlayer) {
         setSettings(message.state.settings);
         setLog(["Odaya katılmak için isim ve fotoğrafını gir."]);
-        window.setTimeout(() => {
-          applyingRemoteRef.current = false;
-        }, 0);
+        setPhase("setup");
+        setPlayers(message.state.players);
         return;
       }
       setPlayers(message.state.players);
@@ -283,30 +242,18 @@ function App() {
       setRevealStep(message.state.revealStep);
       setCountdown(message.state.countdown);
       setLog(message.state.log);
-      window.setTimeout(() => {
-        applyingRemoteRef.current = false;
-      }, 0);
     };
 
     return () => socket.close();
-  }, [isJoinLink, roomCode]);
+  }, [isHost, playerId, roomCode]);
 
-  useEffect(() => {
-    if (!isHost || !hasJoinedRoomRef.current || players.length === 0 || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
-    const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
-    roomStateRef.current = state;
-    wsRef.current.send(JSON.stringify({ type: "state", room: roomCode, clientId: clientIdRef.current, state }));
-  }, [isHost, players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log, roomCode]);
-
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
-
-  function clearTimers() {
-    botTimers.current.forEach(window.clearTimeout);
-    revealTimers.current.forEach(window.clearTimeout);
-    botTimers.current = [];
-    revealTimers.current = [];
+  function sendCommand(payload: Record<string, unknown>) {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      setLog(["Bağlantı hazır değil. Birkaç saniye sonra tekrar dene."]);
+      return false;
+    }
+    wsRef.current.send(JSON.stringify({ ...payload, room: roomCode, clientId: clientIdRef.current }));
+    return true;
   }
 
   function updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
@@ -332,144 +279,59 @@ function App() {
 
   function startLobby(withBots: boolean) {
     const host: Player = {
-      id: playerIdRef.current,
+      id: playerId,
       name: playerName.trim() || "Ev sahibi",
       photo: playerPhoto,
       isHuman: true,
       alive: true,
       voteDone: false,
     };
-    const botCount = withBots ? Math.max(requiredPlayers - 1, 0) : 0;
-    const bots = Array.from({ length: botCount }, (_, index): Player => {
-      const name = demoNames[index % demoNames.length];
-      return {
-        id: createId("bot"),
-        name,
-        photo: botPhotoFor(index),
-        isHuman: false,
-        alive: true,
-        voteDone: false,
-      };
-    });
-
-    const nextPlayers = [host, ...bots];
     window.localStorage.setItem(storageKey(roomCode, "role"), "host");
     window.localStorage.setItem(storageKey(roomCode, "name"), host.name);
     window.localStorage.setItem(storageKey(roomCode, "photo"), host.photo);
     hasJoinedRoomRef.current = true;
     setHasJoinedRoom(true);
-    setPlayers(nextPlayers);
-    setPhase("lobby");
-    setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
+    sendCommand({ type: "create-room", host, settings, withBots });
   }
 
   function joinRoom() {
-    const remoteState = roomStateRef.current;
-    const basePlayers = remoteState?.players ?? players;
-    const guestNumber = basePlayers.filter((player) => player.isHuman).length + 1;
+    const guestNumber = players.filter((player) => player.isHuman).length + 1;
     const joiningPlayer: Player = {
-      id: playerIdRef.current,
+      id: playerId,
       name: playerName.trim() && !["Ev sahibi", "Oyuncu"].includes(playerName.trim()) ? playerName.trim() : `Oyuncu ${guestNumber}`,
       photo: playerPhoto,
       isHuman: true,
       alive: true,
       voteDone: false,
     };
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "add-player", room: roomCode, player: joiningPlayer }));
+    if (sendCommand({ type: "add-player", player: joiningPlayer })) {
       window.localStorage.setItem(storageKey(roomCode, "name"), joiningPlayer.name);
       window.localStorage.setItem(storageKey(roomCode, "photo"), joiningPlayer.photo);
       setLog(["Odaya katılma isteği gönderildi."]);
-      return;
     }
-    const nextPlayers = basePlayers.some((player) => player.id === joiningPlayer.id)
-       ? basePlayers.map((player) => (player.id === joiningPlayer.id ? joiningPlayer : player))
-       : [...basePlayers, joiningPlayer];
-    hasJoinedRoomRef.current = true;
-    window.localStorage.setItem(storageKey(roomCode, "name"), joiningPlayer.name);
-    window.localStorage.setItem(storageKey(roomCode, "photo"), joiningPlayer.photo);
-    setHasJoinedRoom(true);
-    setPlayers(nextPlayers);
-    setSettings(remoteState?.settings ?? settings);
-    setPhase(remoteState && remoteState.phase !== "setup" ? remoteState.phase : "lobby");
-    setLog(["Odaya katıldın."]);
   }
 
   function addDemoBot() {
-    if (players.length >= requiredPlayers) return;
-    const name = demoNames[players.length % demoNames.length];
-    setPlayers((current) => [
-      ...current,
-      {
-        id: createId("bot"),
-        name,
-        photo: botPhotoFor(current.length - 1),
-        isHuman: false,
-        alive: true,
-        voteDone: false,
-      },
-    ]);
+    sendCommand({ type: "add-bot" });
   }
 
   function assignRoles() {
-    const baseDeck = roleDeck(settings);
-    const deck = baseDeck.includes("Vampir")
-      ? (["Vampir", ...shuffle(baseDeck.filter((role, index) => role !== "Vampir" || index !== baseDeck.indexOf("Vampir")))] as Role[])
-      : shuffle(baseDeck);
-    setPlayers((current) => {
-      const nextPlayers = current.map((player, index) => {
-        const role = deck[index] ?? "Koylu";
-        return { ...player, role, team: roleMeta[role].team };
-      });
-      return nextPlayers;
-    });
-    setPhase("roles");
-    setLog((current) => ["Roller dağıtıldı.", ...current]);
-  }
-
-  function startNight() {
-    const seer = players.find((player) => player.alive && player.role === "Kahin");
-    const doctor = players.find((player) => player.alive && player.role === "Doktor");
-
-    setNightAction({
-      vampireTargetId: undefined,
-      seerTargetId: seer ? pickTarget(players, seer.id)?.id : undefined,
-      doctorTargetId: doctor ? pickTarget(players)?.id : undefined,
-    });
-    setPhase("night");
-    setLog((current) => ["Gece başladı.", ...current]);
+    sendCommand({ type: "assign-roles" });
   }
 
   function chooseVampireTarget(targetId: string) {
-    setNightAction((current) => ({ ...current, vampireTargetId: targetId }));
-    setLog((current) => ["Vampir hedefini seçti.", ...current]);
+    if (!human) return;
+    sendCommand({ type: "vampire-target", playerId: human.id, targetId });
   }
 
   function resolveNight() {
-    const fallbackTarget = pickTarget(players.filter((player) => player.team !== "vampir"));
-    const target = players.find((player) => player.id === nightAction.vampireTargetId) ?? fallbackTarget;
-    const protectedPlayer = players.find((player) => player.id === nightAction.doctorTargetId);
-    const nextPlayers = players.map((player) =>
-      target && target.id !== protectedPlayer?.id && player.id === target.id ? { ...player, alive: false } : player,
-    );
-
-    setPlayers(nextPlayers);
-    setEliminatedId(target && target.id !== protectedPlayer?.id ? target.id : undefined);
-    setPhase(getWinner(nextPlayers) ? "gameover" : "day");
-    setLog((current) => [target && target.id !== protectedPlayer?.id ? `${target.name} gece elendi.` : "Gece sakin geçti.", ...current]);
+    sendCommand({ type: "resolve-night" });
   }
 
   function startVoting() {
     setSelectedVoteId(undefined);
     setVoteNotice("");
-    clearTimers();
-    setPlayers((current) =>
-      current.map((player) => ({ ...player, voteDone: false, voteTargetId: undefined })),
-    );
-    phaseRef.current = "vote";
-    setPhase("vote");
-    setLog((current) => ["Oylama başladı. Demo oyuncuları sırayla oy verecek.", ...current]);
-    scheduleBotVotes();
+    sendCommand({ type: "start-voting" });
   }
 
   function confirmHumanVote() {
@@ -481,111 +343,18 @@ function App() {
       setVoteNotice("Önce bir fotoğraf seç.");
       return;
     }
-    const nextPlayers = players.map((player) =>
-      player.id === human.id ? { ...player, voteDone: true, voteTargetId: selectedVoteId } : player,
-    );
-    if (!isHost && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "update-player",
-          room: roomCode,
-          player: { ...human, voteDone: true, voteTargetId: selectedVoteId },
-        }),
-      );
+    if (sendCommand({ type: "cast-vote", playerId: human.id, targetId: selectedVoteId })) {
       setVoteNotice("");
       setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
-      return;
     }
-    setPlayers(nextPlayers);
-    setVoteNotice("");
-    setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
-    maybeBeginVoteReveal(nextPlayers);
-  }
-
-  function scheduleBotVotes() {
-    const botVoters = players.filter((player) => player.alive && !player.isHuman);
-    const delayStep = botVoters.length > 1 ? 10000 / (botVoters.length - 1) : 0;
-
-    botVoters.forEach((bot, index) => {
-      const delay = Math.round(1200 + index * delayStep);
-      const timer = window.setTimeout(() => {
-        setPlayers((current) => {
-          const voter = current.find((player) => player.id === bot.id && player.alive && !player.voteDone);
-          if (!voter) return current;
-          const target = pickTarget(current, voter.id);
-          if (!target) return current;
-          setLog((events) => [`${voter.name} oyunu tamamladı.`, ...events]);
-          const nextPlayers = current.map((player) =>
-            player.id === voter.id ? { ...player, voteDone: true, voteTargetId: target.id } : player,
-          );
-          maybeBeginVoteReveal(nextPlayers);
-          return nextPlayers;
-        });
-      }, delay);
-      botTimers.current.push(timer);
-    });
-  }
-
-  function maybeBeginVoteReveal(sourcePlayers: Player[]) {
-    const alive = sourcePlayers.filter((player) => player.alive);
-    if (phaseRef.current !== "vote" || alive.some((player) => !player.voteDone)) return;
-    beginVoteReveal(sourcePlayers);
-  }
-
-  function beginVoteReveal(sourcePlayers: Player[]) {
-    if (phaseRef.current !== "vote") return;
-    clearTimers();
-    phaseRef.current = "voteReveal";
-    setPhase("voteReveal");
-    setRevealStep("countdown");
-    setCountdown(10);
-    setLog((current) => ["Herkes oyunu tamamladı. Sayım başladı.", ...current]);
-
-    for (let value = 9; value >= 0; value -= 1) {
-      const timer = window.setTimeout(() => setCountdown(value), (10 - value) * 1000);
-      revealTimers.current.push(timer);
-    }
-
-    const resultTimer = window.setTimeout(() => {
-      const target = getVoteTarget(sourcePlayers);
-      if (!target) return;
-      setEliminatedId(target.id);
-      setRevealStep("eliminated");
-      setLog((current) => [`${target.name} elendi. Rolü birazdan açıklanacak.`, ...current]);
-    }, 10200);
-
-    const roleTimer = window.setTimeout(() => resolveVote(sourcePlayers), 13200);
-    revealTimers.current.push(resultTimer, roleTimer);
-  }
-
-  function resolveVote(sourcePlayers = players) {
-    const target = getVoteTarget(sourcePlayers);
-    if (!target) return;
-    const nextPlayers = sourcePlayers.map((player) => (player.id === target.id ? { ...player, alive: false } : player));
-    setPlayers(nextPlayers);
-    setEliminatedId(target.id);
-    setRevealStep("role");
-    setPhase(getWinner(nextPlayers) ? "gameover" : "result");
-    setLog((current) => [`${target.name} bir ${target.role ?? "oyuncu"} çıktı.`, ...current]);
   }
 
   function nextRound() {
-    setRound((current) => current + 1);
-    startNight();
+    sendCommand({ type: "next-round" });
   }
 
   function resetGame() {
-    setPhase("setup");
-    setPlayers([]);
-    setRound(1);
-    setNightAction({});
-    setSelectedVoteId(undefined);
-    setVoteNotice("");
-    setRevealStep("countdown");
-    setCountdown(10);
-    setEliminatedId(undefined);
-    setLog(["Oyun hazır."]);
-    clearTimers();
+    sendCommand({ type: "reset-room", settings: initialSettings });
   }
 
   async function copyJoinUrl() {
@@ -616,8 +385,8 @@ function App() {
 
         {phase === "setup" && (
           <Screen
-            title={isJoinLink && !hasJoinedRoom ? "Odaya katıl" : "Oyunu kur"}
-            subtitle={isJoinLink && !hasJoinedRoom ? "İsim ve fotoğrafını gir, canlı odaya bağlan." : "Oyuncu sayısı, rol dağılımı ve profil."}
+            title={!isHost && !hasJoinedRoom ? "Odaya katıl" : "Oyunu kur"}
+            subtitle={!isHost && !hasJoinedRoom ? "İsim ve fotoğrafını gir, canlı odaya bağlan." : "Oyuncu sayısı, rol dağılımı ve profil."}
           >
             <div className="profile-card">
               <img src={playerPhoto} alt="Profil" />
@@ -640,7 +409,7 @@ function App() {
               </div>
             </div>
 
-            {!isJoinLink && (
+            {isHost && (
               <>
                 <div className="compact-grid">
                   <Counter label="Vampir" value={settings.vampireCount} min={1} max={4} onChange={(value) => updateSetting("vampireCount", value)} />
@@ -659,7 +428,7 @@ function App() {
             )}
 
             <div className="action-stack">
-              {isJoinLink ? (
+              {!isHost ? (
                 <button className="button primary" onClick={joinRoom}>Odaya katıl</button>
               ) : (
                 <>
@@ -684,7 +453,7 @@ function App() {
               </div>
             </div>
             <PlayerList players={players} />
-            {!isJoinLink ? (
+            {isHost ? (
               <div className="action-stack">
                 <button className="button soft" disabled={players.length >= requiredPlayers} onClick={addDemoBot}><Bot size={18} /> Bot ekle</button>
                 <button className="button primary" disabled={players.length < requiredPlayers} onClick={assignRoles}>Rolleri dağıt</button>
@@ -703,7 +472,7 @@ function App() {
             </div>
             {human.role === "Vampir" && <VampireTeam players={vampireTeam} />}
             <PlayerList players={players} hideRoles />
-            {!isJoinLink ? (
+            {isHost ? (
               <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> İlk oylamayı başlat</button>
             ) : (
               <p className="vote-hint">Ev sahibinin ilk oylamayı başlatması bekleniyor.</p>
@@ -714,7 +483,7 @@ function App() {
         {phase === "night" && (
           <Screen title="Gece" subtitle="Oyuncular gizli aksiyonlarını tamamlıyor.">
             <NightSummary human={human} players={players} vampires={vampireTeam} action={nightAction} onVampireTarget={chooseVampireTarget} />
-            {!isJoinLink && <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>}
+            {isHost && <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>}
           </Screen>
         )}
 
@@ -726,7 +495,7 @@ function App() {
                 : "Bu gece kimse elenmedi."}
             </div>
             <PlayerList players={players} hideRoles />
-            {!isJoinLink ? (
+            {isHost ? (
               <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> Oylamaya geç</button>
             ) : (
               <p className="vote-hint">Ev sahibinin oylamayı başlatması bekleniyor.</p>
@@ -780,7 +549,7 @@ function App() {
             <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
               {phase !== "gameover" ? (
-                !isJoinLink ? (
+                isHost ? (
                   <button className="button primary" onClick={nextRound}><Moon size={18} /> Geceye geç</button>
                 ) : (
                   <p className="vote-hint">Ev sahibinin geceyi başlatması bekleniyor.</p>
@@ -788,7 +557,7 @@ function App() {
               ) : (
                 <p className="vote-hint">{winner}</p>
               )}
-              {!isJoinLink && <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>}
+              {isHost && <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>}
             </div>
           </Screen>
         )}
