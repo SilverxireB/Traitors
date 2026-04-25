@@ -160,7 +160,6 @@ function App() {
   const [playerName, setPlayerName] = useState("Ev sahibi");
   const [playerPhoto, setPlayerPhoto] = useState(avatarFor("Ev sahibi", 0));
   const [players, setPlayers] = useState<Player[]>([]);
-  const [demoMode, setDemoMode] = useState(false);
   const [round, setRound] = useState(1);
   const [nightAction, setNightAction] = useState<NightAction>({});
   const [selectedVoteId, setSelectedVoteId] = useState<string>();
@@ -250,7 +249,6 @@ function App() {
     });
 
     const nextPlayers = [host, ...bots];
-    setDemoMode(withBots);
     setPlayers(nextPlayers);
     setPhase("lobby");
     setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
@@ -291,7 +289,7 @@ function App() {
 
   function assignRoles() {
     const baseDeck = roleDeck(settings);
-    const deck = demoMode && baseDeck.includes("Vampir")
+    const deck = baseDeck.includes("Vampir")
       ? (["Vampir", ...shuffle(baseDeck.filter((role, index) => role !== "Vampir" || index !== baseDeck.indexOf("Vampir")))] as Role[])
       : shuffle(baseDeck);
     setPlayers((current) => {
@@ -367,7 +365,7 @@ function App() {
 
   function scheduleBotVotes() {
     const botVoters = players.filter((player) => player.alive && !player.isHuman);
-    const delayStep = botVoters.length > 1 ? 30000 / (botVoters.length - 1) : 0;
+    const delayStep = botVoters.length > 1 ? 10000 / (botVoters.length - 1) : 0;
 
     botVoters.forEach((bot, index) => {
       const delay = Math.round(1200 + index * delayStep);
@@ -440,7 +438,6 @@ function App() {
   function resetGame() {
     setPhase("setup");
     setPlayers([]);
-    setDemoMode(false);
     setRound(1);
     setNightAction({});
     setSelectedVoteId(undefined);
