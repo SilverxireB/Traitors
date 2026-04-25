@@ -33,6 +33,18 @@ type NightAction = {
   doctorTargetId?: string;
 };
 
+type RoomState = {
+  players: Player[];
+  phase: Phase;
+  settings: GameSettings;
+  round: number;
+  nightAction: NightAction;
+  eliminatedId?: string;
+  revealStep: RevealStep;
+  countdown: number;
+  log: string[];
+};
+
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
 const botSelfies = [
   "https://randomuser.me/api/portraits/women/44.jpg",
@@ -154,6 +166,10 @@ function resizePhoto(file: File) {
   });
 }
 
+function filePreview(file: File) {
+  return URL.createObjectURL(file);
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
@@ -173,6 +189,8 @@ function App() {
   const botTimers = useRef<number[]>([]);
   const revealTimers = useRef<number[]>([]);
   const phaseRef = useRef<Phase>("setup");
+  const wsRef = useRef<WebSocket | null>(null);
+  const applyingRemoteRef = useRef(false);
   const playerIdRef = useRef(createId("player"));
   const queryRoom = new URLSearchParams(window.location.search).get("room");
 
@@ -195,6 +213,42 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/room-ws`);
+    wsRef.current = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "join", room: gameCode }));
+    };
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data) as { type: "state"; state: RoomState | null };
+      if (message.type !== "state" || !message.state) return;
+      applyingRemoteRef.current = true;
+      setPlayers((current) => mergeRemotePlayers(current, message.state!.players));
+      setPhase(message.state.phase);
+      setSettings(message.state.settings);
+      setRound(message.state.round);
+      setNightAction(message.state.nightAction);
+      setEliminatedId(message.state.eliminatedId);
+      setRevealStep(message.state.revealStep);
+      setCountdown(message.state.countdown);
+      setLog(message.state.log);
+      window.setTimeout(() => {
+        applyingRemoteRef.current = false;
+      }, 0);
+    };
+
+    return () => socket.close();
+  }, []);
+
+  useEffect(() => {
+    if (applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
+    wsRef.current.send(JSON.stringify({ type: "state", room: gameCode, state }));
+  }, [players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log]);
+
+  useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
 
@@ -215,6 +269,12 @@ function App() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function mergeRemotePlayers(localPlayers: Player[], remotePlayers: Player[]) {
+    const localHuman = localPlayers.find((player) => player.id === playerIdRef.current);
+    const remoteWithoutLocal = remotePlayers.filter((player) => player.id !== playerIdRef.current);
+    return localHuman ? [localHuman, ...remoteWithoutLocal] : remotePlayers;
+  }
+
   async function handlePhotoUpload(file?: File) {
     if (!file) return;
     setPhotoNotice("Fotoğraf hazırlanıyor...");
@@ -223,7 +283,8 @@ function App() {
       setPlayerPhoto(photo);
       setPhotoNotice("Fotoğraf yüklendi.");
     } catch (error) {
-      setPhotoNotice(error instanceof Error ? error.message : "Fotoğraf yüklenemedi.");
+      setPlayerPhoto(filePreview(file));
+      setPhotoNotice(error instanceof Error ? `${error.message} Ham önizleme denendi.` : "Ham önizleme denendi.");
     }
   }
 

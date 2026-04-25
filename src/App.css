@@ -308,10 +308,10 @@ button.need-choice {
 
 .join-card {
   display: grid;
-  grid-template-columns: 112px 1fr;
-  gap: 14px;
+  grid-template-columns: 132px 1fr;
+  gap: 16px;
   align-items: center;
-  padding: 12px;
+  padding: 16px;
   border-radius: 24px;
 }
 
@@ -335,10 +335,10 @@ button.need-choice {
 
 .qr {
   display: grid;
-  width: 108px;
-  height: 108px;
+  width: 128px;
+  height: 128px;
   place-items: center;
-  padding: 9px;
+  padding: 10px;
   border-radius: 16px;
   background: #fff7ed;
 }
