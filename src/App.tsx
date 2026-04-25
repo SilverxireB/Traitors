@@ -350,7 +350,10 @@ function App() {
   }
 
   function confirmHumanVote() {
-    if (!human) return;
+    if (!human || !human.alive) {
+      setVoteNotice("Elendiğin için oy kullanamazsın.");
+      return;
+    }
     if (!selectedVoteId) {
       setVoteNotice("Önce bir fotoğraf seç.");
       return;
@@ -568,7 +571,7 @@ function App() {
           </Screen>
         )}
 
-        {phase === "vote" && human && (
+        {phase === "vote" && human?.alive && (
           <Screen title="Oylama" subtitle="Bir fotoğraf seç, sonra oyunu tamamla.">
             <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
             <div className="vote-grid">
@@ -589,6 +592,13 @@ function App() {
               {human.voteDone ? "Oy tamamlandı" : "Oyumu tamamla"}
             </button>
             {voteNotice && <p className="vote-hint">{voteNotice}</p>}
+          </Screen>
+        )}
+
+        {phase === "vote" && human && !human.alive && (
+          <Screen title="Elendin" subtitle="Oylamayı izleyebilirsin, oy kullanamazsın.">
+            <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
+            <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
           </Screen>
         )}
 
