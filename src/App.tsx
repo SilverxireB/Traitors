@@ -33,10 +33,14 @@ type NightAction = {
   doctorTargetId?: string;
 };
 
-type RoomMessage =
-  | { type: "state"; players: Player[]; phase: Phase; settings: GameSettings; round: number }
-  | { type: "join"; player: Player }
-  | { type: "update"; players: Player[]; phase: Phase; settings: GameSettings; round: number };
+type RoomState = {
+  players: Player[];
+  phase: Phase;
+  settings: GameSettings;
+  round: number;
+};
+
+type RoomMessage = { type: "state"; state: RoomState | null };
 
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
 const initialSettings: GameSettings = {
@@ -157,16 +161,20 @@ function App() {
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws?room=${gameCode}`);
+    const socket = new WebSocket(`${protocol}://${window.location.host}/room-ws`);
     wsRef.current = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "join", room: gameCode }));
+    };
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as RoomMessage;
-      if (message.type !== "state" && message.type !== "update") return;
-      setPlayers((current) => mergeRemotePlayers(current, message.players));
-      setSettings(message.settings);
-      setRound(message.round);
-      if (message.phase !== "setup") setPhase(message.phase);
+      if (message.type !== "state" || !message.state) return;
+      setPlayers((current) => mergeRemotePlayers(current, message.state!.players));
+      setSettings(message.state.settings);
+      setRound(message.state.round);
+      if (message.state.phase !== "setup") setPhase(message.state.phase);
     };
 
     return () => socket.close();
@@ -238,7 +246,9 @@ function App() {
       alive: true,
       voteDone: false,
     };
-    wsRef.current?.send(JSON.stringify({ type: "join", player: joiningPlayer } satisfies RoomMessage));
+    const nextPlayers = mergeRemotePlayers(players, [...players, joiningPlayer]);
+    setPlayers(nextPlayers);
+    broadcastRoom(nextPlayers, "lobby", settings, round);
     setPhase("lobby");
     setLog(["Odaya katıldın."]);
   }
