@@ -176,7 +176,8 @@ button.need-choice {
 
 .profile-card img,
 .player-row img,
-.vote-card img {
+.vote-card img,
+.eliminated-strip img {
   width: 100%;
   aspect-ratio: 4 / 3;
   border: 2px solid rgba(255, 244, 230, 0.16);
@@ -356,7 +357,7 @@ button.need-choice {
 
 .player-row {
   display: grid;
-  grid-template-columns: 92px 1fr auto;
+  grid-template-columns: 78px 1fr auto;
   gap: 12px;
   align-items: center;
   padding: 10px;
@@ -369,12 +370,12 @@ button.need-choice {
 }
 
 .player-row.dead img,
-.fallen-card img {
+.eliminated-strip img {
   filter: grayscale(1);
 }
 
 .player-row.dead .portrait-wrap::after,
-.fallen-card .portrait-wrap::after {
+.eliminated-strip .portrait-wrap::after {
   content: "×";
   position: absolute;
   inset: 0;
@@ -421,7 +422,7 @@ button.need-choice {
   color: #ffe9d0;
 }
 
-.fallen-strip {
+.eliminated-strip {
   display: grid;
   gap: 10px;
   border: 1px solid var(--line);
@@ -430,32 +431,33 @@ button.need-choice {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.fallen-strip h2 {
-  margin: 0;
-  font-size: 1rem;
+.eliminated-strip > strong {
   color: var(--gold);
 }
 
-.fallen-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+.eliminated-strip > div {
+  display: flex;
   gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
-.fallen-card {
+.eliminated-strip article {
   display: grid;
-  gap: 7px;
+  gap: 10px;
+  min-width: 96px;
   border-radius: 18px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.065);
 }
 
-.fallen-card strong,
-.fallen-card small {
+.eliminated-strip small,
+.eliminated-strip em {
   display: block;
+  font-style: normal;
 }
 
-.fallen-card small {
+.eliminated-strip em {
   color: var(--gold);
   font-weight: 900;
 }
@@ -593,7 +595,7 @@ button.need-choice {
 
 .vote-card {
   display: grid;
-  grid-template-columns: 112px 1fr;
+  grid-template-columns: 88px 1fr;
   gap: 12px;
   align-items: center;
   width: 100%;
@@ -627,13 +629,11 @@ button.need-choice {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.vote-trace h2 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+.vote-trace > strong {
   color: var(--gold);
 }
 
-.vote-line {
+.vote-trace div {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   gap: 8px;
@@ -644,16 +644,7 @@ button.need-choice {
   animation: slide-in 0.42s ease both;
 }
 
-.vote-line strong,
-.vote-line small {
-  display: block;
-}
-
-.vote-line small {
-  color: var(--muted);
-}
-
-.vote-arrow {
+.vote-trace b {
   color: var(--gold);
   font-weight: 950;
 }
@@ -730,11 +721,11 @@ button.need-choice {
   .join-card,
   .player-row,
   .vote-card {
-    grid-template-columns: 86px 1fr;
+    grid-template-columns: 76px 1fr;
   }
 
   .player-row {
-    grid-template-columns: 86px 1fr;
+    grid-template-columns: 76px 1fr;
   }
 
   .player-row span {

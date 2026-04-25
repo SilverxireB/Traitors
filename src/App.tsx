@@ -535,7 +535,7 @@ function App() {
         {phase === "voteReveal" && (
           <Screen title="Sonuç geliyor" subtitle={revealStep === "countdown" ? "Oylar sayılıyor." : "Açıklama zamanı."}>
             <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
-            {voteRows.length > 0 && <VoteTrace rows={voteRows} />}
+            {revealStep !== "countdown" && voteRows.length > 0 && <VoteTrace rows={voteRows} />}
             <RevealPanel step={revealStep} countdown={countdown} eliminated={eliminated} />
           </Screen>
         )}
@@ -715,8 +715,9 @@ function EliminatedStrip({ players }: { players: Player[] }) {
       <div>
         {players.map((player) => (
           <article key={player.id}>
-            <img src={player.photo} alt={player.name} />
-            <span>×</span>
+            <span className="eliminated-photo">
+              <img src={player.photo} alt={player.name} />
+            </span>
             <small>{player.name}</small>
             <em>{player.role}</em>
           </article>
