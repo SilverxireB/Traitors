@@ -188,6 +188,7 @@ function App() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [roomCode] = useState(() => queryRoom || createRoomCode());
   const [hasJoinedRoom, setHasJoinedRoom] = useState(!queryRoom);
+  const [isHost] = useState(!queryRoom);
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
   const [playerName, setPlayerName] = useState(queryRoom ? "Oyuncu" : "Ev sahibi");
   const [playerPhoto, setPlayerPhoto] = useState(avatarFor(queryRoom ? "Oyuncu" : "Ev sahibi", 0));
@@ -243,6 +244,11 @@ function App() {
       const message = JSON.parse(event.data) as { type: "state"; state: RoomState | null };
       if (message.type !== "state" || !message.state) return;
       roomStateRef.current = message.state;
+      const localPlayer = message.state.players.find((player) => player.id === playerIdRef.current);
+      if (isJoinLink && localPlayer && !hasJoinedRoomRef.current) {
+        hasJoinedRoomRef.current = true;
+        setHasJoinedRoom(true);
+      }
       applyingRemoteRef.current = true;
       if (isJoinLink && !hasJoinedRoomRef.current) {
         setSettings(message.state.settings);
@@ -270,11 +276,11 @@ function App() {
   }, [isJoinLink, roomCode]);
 
   useEffect(() => {
-    if (!hasJoinedRoomRef.current || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (!isHost || !hasJoinedRoomRef.current || applyingRemoteRef.current || wsRef.current?.readyState !== WebSocket.OPEN) return;
     const state: RoomState = { players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log };
     roomStateRef.current = state;
     wsRef.current.send(JSON.stringify({ type: "state", room: roomCode, clientId: clientIdRef.current, state }));
-  }, [players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log, roomCode]);
+  }, [isHost, players, phase, settings, round, nightAction, eliminatedId, revealStep, countdown, log, roomCode]);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -348,7 +354,7 @@ function App() {
     const guestNumber = basePlayers.filter((player) => player.isHuman).length + 1;
     const joiningPlayer: Player = {
       id: playerIdRef.current,
-      name: playerName.trim() && playerName.trim() !== "Ev sahibi" ? playerName.trim() : `Oyuncu ${guestNumber}`,
+      name: playerName.trim() && !["Ev sahibi", "Oyuncu"].includes(playerName.trim()) ? playerName.trim() : `Oyuncu ${guestNumber}`,
       photo: playerPhoto,
       isHuman: true,
       alive: true,
@@ -622,12 +628,14 @@ function App() {
             )}
 
             <div className="action-stack">
-              {isJoinLink && !hasJoinedRoom ? (
+              {isJoinLink ? (
                 <button className="button primary" onClick={joinRoom}>Odaya katıl</button>
               ) : (
-                <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
+                <>
+                  <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
+                  <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>
+                </>
               )}
-              {!isJoinLink && <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>}
             </div>
           </Screen>
         )}
@@ -645,10 +653,14 @@ function App() {
               </div>
             </div>
             <PlayerList players={players} />
-            <div className="action-stack">
-              <button className="button soft" disabled={players.length >= requiredPlayers} onClick={addDemoBot}><Bot size={18} /> Bot ekle</button>
-              <button className="button primary" disabled={players.length < requiredPlayers} onClick={assignRoles}>Rolleri dağıt</button>
-            </div>
+            {!isJoinLink ? (
+              <div className="action-stack">
+                <button className="button soft" disabled={players.length >= requiredPlayers} onClick={addDemoBot}><Bot size={18} /> Bot ekle</button>
+                <button className="button primary" disabled={players.length < requiredPlayers} onClick={assignRoles}>Rolleri dağıt</button>
+              </div>
+            ) : (
+              <p className="vote-hint">Ev sahibi oyunu başlatınca ekranın otomatik ilerler.</p>
+            )}
           </Screen>
         )}
 
@@ -660,14 +672,18 @@ function App() {
             </div>
             {human.role === "Vampir" && <VampireTeam players={vampireTeam} />}
             <PlayerList players={players} hideRoles />
-            <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> İlk oylamayı başlat</button>
+            {!isJoinLink ? (
+              <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> İlk oylamayı başlat</button>
+            ) : (
+              <p className="vote-hint">Ev sahibinin ilk oylamayı başlatması bekleniyor.</p>
+            )}
           </Screen>
         )}
 
         {phase === "night" && (
           <Screen title="Gece" subtitle="Oyuncular gizli aksiyonlarını tamamlıyor.">
             <NightSummary human={human} players={players} vampires={vampireTeam} action={nightAction} onVampireTarget={chooseVampireTarget} />
-            <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>
+            {!isJoinLink && <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>}
           </Screen>
         )}
 
@@ -679,7 +695,11 @@ function App() {
                 : "Bu gece kimse elenmedi."}
             </div>
             <PlayerList players={players} hideRoles />
-            <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> Oylamaya geç</button>
+            {!isJoinLink ? (
+              <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> Oylamaya geç</button>
+            ) : (
+              <p className="vote-hint">Ev sahibinin oylamayı başlatması bekleniyor.</p>
+            )}
           </Screen>
         )}
 
@@ -729,7 +749,11 @@ function App() {
             <PlayerList players={players} hideRoles revealPlayerId={eliminatedId} />
             <div className="action-stack">
               {phase !== "gameover" ? (
-                <button className="button primary" onClick={nextRound}><Moon size={18} /> Geceye geç</button>
+                !isJoinLink ? (
+                  <button className="button primary" onClick={nextRound}><Moon size={18} /> Geceye geç</button>
+                ) : (
+                  <p className="vote-hint">Ev sahibinin geceyi başlatması bekleniyor.</p>
+                )
               ) : (
                 <p className="vote-hint">{winner}</p>
               )}
