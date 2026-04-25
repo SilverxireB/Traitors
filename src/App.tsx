@@ -1,24 +1,10 @@
 import { useMemo, useState } from "react";
-import {
-  Bot,
-  Check,
-  Copy,
-  Crown,
-  Lock,
-  Moon,
-  QrCode,
-  RotateCcw,
-  Smartphone,
-  Sparkles,
-  Sun,
-  Users,
-  Vote,
-} from "lucide-react";
+import { Bot, Check, Copy, Moon, RotateCcw, Sparkles, Sun, Upload, Vote } from "lucide-react";
 import "./App.css";
 
 type Role = "Vampir" | "Koylu" | "Kahin" | "Doktor";
 type Team = "vampir" | "koy";
-type Phase = "setup" | "lobby" | "roles" | "night" | "day" | "vote" | "result" | "gameover";
+type Phase = "setup" | "lobby" | "roles" | "night" | "day" | "vote" | "voteReveal" | "result" | "gameover";
 
 type Player = {
   id: string;
@@ -28,7 +14,7 @@ type Player = {
   team?: Team;
   isHuman: boolean;
   alive: boolean;
-  voteLocked: boolean;
+  voteDone: boolean;
   voteTargetId?: string;
 };
 
@@ -46,17 +32,6 @@ type NightAction = {
 };
 
 const demoNames = ["Mina", "Bora", "Lara", "Deniz", "Efe", "Ada", "Mert", "Nora"];
-const photoGradients = [
-  "linear-gradient(135deg, #7f1d1d, #dc2626)",
-  "linear-gradient(135deg, #312e81, #8b5cf6)",
-  "linear-gradient(135deg, #164e63, #06b6d4)",
-  "linear-gradient(135deg, #713f12, #f59e0b)",
-  "linear-gradient(135deg, #581c87, #d946ef)",
-  "linear-gradient(135deg, #14532d, #22c55e)",
-  "linear-gradient(135deg, #881337, #fb7185)",
-  "linear-gradient(135deg, #1e293b, #64748b)",
-];
-
 const initialSettings: GameSettings = {
   vampireCount: 2,
   villagerCount: 4,
@@ -65,9 +40,9 @@ const initialSettings: GameSettings = {
 };
 
 const roleMeta: Record<Role, { team: Team; hint: string }> = {
-  Vampir: { team: "vampir", hint: "Gece bir hedef seç. Vampirler eşitliği yakalarsa kazanır." },
-  Koylu: { team: "koy", hint: "Gündüz tartış, şüphelini oylamada ele." },
-  Kahin: { team: "koy", hint: "Gece bir oyuncunun takımını öğren." },
+  Vampir: { team: "vampir", hint: "Gece hedef seç. Sayıca eşitliği yakalarsan kazanırsın." },
+  Koylu: { team: "koy", hint: "Konuş, gözlemle, doğru kişiyi ele." },
+  Kahin: { team: "koy", hint: "Gece bir oyuncunun tarafını öğren." },
   Doktor: { team: "koy", hint: "Gece bir oyuncuyu koru." },
 };
 
@@ -79,11 +54,11 @@ function avatarFor(name: string, index: number) {
   return `https://api.dicebear.com/9.x/personas/svg?seed=${encodeURIComponent(name)}-${index}`;
 }
 
-function getTotalPlayers(settings: GameSettings) {
+function totalPlayers(settings: GameSettings) {
   return settings.vampireCount + settings.villagerCount + Number(settings.seerEnabled) + Number(settings.doctorEnabled);
 }
 
-function buildRoleDeck(settings: GameSettings): Role[] {
+function roleDeck(settings: GameSettings): Role[] {
   return [
     ...Array.from({ length: settings.vampireCount }, () => "Vampir" as const),
     ...Array.from({ length: settings.villagerCount }, () => "Koylu" as const),
@@ -96,28 +71,40 @@ function shuffle<T>(items: T[]) {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
-function chooseTarget(players: Player[], avoidId?: string) {
+function pickTarget(players: Player[], avoidId?: string) {
   const options = players.filter((player) => player.alive && player.id !== avoidId);
   return options[Math.floor(Math.random() * options.length)];
+}
+
+function getWinner(players: Player[]) {
+  if (!players.length) return undefined;
+  const aliveVampires = players.filter((player) => player.alive && player.team === "vampir").length;
+  const aliveVillage = players.filter((player) => player.alive && player.team === "koy").length;
+  if (aliveVampires === 0) return "Köylüler kazandı";
+  if (aliveVampires >= aliveVillage) return "Vampirler kazandı";
+  return undefined;
 }
 
 function App() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [settings, setSettings] = useState<GameSettings>(initialSettings);
   const [playerName, setPlayerName] = useState("Ev sahibi");
+  const [playerPhoto, setPlayerPhoto] = useState(avatarFor("Ev sahibi", 0));
   const [players, setPlayers] = useState<Player[]>([]);
-  const [nightAction, setNightAction] = useState<NightAction>({});
-  const [eliminatedId, setEliminatedId] = useState<string>();
   const [round, setRound] = useState(1);
-  const [eventLog, setEventLog] = useState<string[]>(["Oyun kurulumu bekleniyor."]);
+  const [nightAction, setNightAction] = useState<NightAction>({});
+  const [selectedVoteId, setSelectedVoteId] = useState<string>();
+  const [eliminatedId, setEliminatedId] = useState<string>();
   const [joinCopied, setJoinCopied] = useState(false);
+  const [log, setLog] = useState<string[]>(["Oyun hazır."]);
 
-  const totalPlayers = getTotalPlayers(settings);
+  const gameCode = "VAMP-2026";
+  const joinUrl = `${window.location.origin}?room=${gameCode}`;
   const human = players.find((player) => player.isHuman);
   const alivePlayers = players.filter((player) => player.alive);
   const eliminated = players.find((player) => player.id === eliminatedId);
-  const gameCode = "VAMP-2026";
-  const joinUrl = `${window.location.origin}?room=${gameCode}`;
+  const requiredPlayers = totalPlayers(settings);
+  const winner = getWinner(players);
 
   const voteTallies = useMemo(() => {
     return players.reduce<Record<string, number>>((acc, player) => {
@@ -126,67 +113,64 @@ function App() {
     }, {});
   }, [players]);
 
-  const winner = useMemo(() => {
-    const aliveVampires = players.filter((player) => player.alive && player.team === "vampir").length;
-    const aliveVillage = players.filter((player) => player.alive && player.team === "koy").length;
-    if (!players.length) return undefined;
-    if (aliveVampires === 0) return "Koyluler kazandi";
-    if (aliveVampires >= aliveVillage) return "Vampirler kazandi";
-    return undefined;
-  }, [players]);
-
+  const votersDone = players.filter((player) => player.alive && player.voteDone);
+  const pendingVoters = players.filter((player) => player.alive && !player.voteDone);
   function updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function handlePhotoUpload(file?: File) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setPlayerPhoto(String(reader.result));
+    reader.readAsDataURL(file);
+  }
+
   function startLobby(withBots: boolean) {
-    const humanPlayer: Player = {
+    const host: Player = {
       id: createId("player"),
       name: playerName.trim() || "Ev sahibi",
-      photo: avatarFor(playerName || "Ev sahibi", 0),
+      photo: playerPhoto,
       isHuman: true,
       alive: true,
-      voteLocked: false,
+      voteDone: false,
     };
+    const botCount = withBots ? Math.max(requiredPlayers - 1, 0) : 0;
+    const bots = Array.from({ length: botCount }, (_, index): Player => {
+      const name = demoNames[index % demoNames.length];
+      return {
+        id: createId("bot"),
+        name,
+        photo: avatarFor(name, index + 1),
+        isHuman: false,
+        alive: true,
+        voteDone: false,
+      };
+    });
 
-    const botCount = withBots ? Math.max(totalPlayers - 1, 0) : 0;
-    const bots = Array.from({ length: botCount }, (_, index) => ({
-      id: createId("bot"),
-      name: demoNames[index % demoNames.length],
-      photo: avatarFor(demoNames[index % demoNames.length], index + 1),
-      isHuman: false,
-      alive: true,
-      voteLocked: false,
-    }));
-
-    setPlayers([humanPlayer, ...bots]);
+    setPlayers([host, ...bots]);
     setPhase("lobby");
-    setEventLog([
-      withBots
-        ? "Demo modu acildi: botlar normal oyuncu gibi katildi."
-        : "Oda acildi: arkadaslar QR veya link ile katilabilir.",
-    ]);
+    setLog([withBots ? "Demo oyuncuları eklendi." : "Oda açıldı."]);
   }
 
   function addDemoBot() {
-    if (players.length >= totalPlayers) return;
-    const index = players.length;
-    const name = demoNames[index % demoNames.length];
+    if (players.length >= requiredPlayers) return;
+    const name = demoNames[players.length % demoNames.length];
     setPlayers((current) => [
       ...current,
       {
         id: createId("bot"),
         name,
-        photo: avatarFor(name, index),
+        photo: avatarFor(name, current.length),
         isHuman: false,
         alive: true,
-        voteLocked: false,
+        voteDone: false,
       },
     ]);
   }
 
   function assignRoles() {
-    const deck = shuffle(buildRoleDeck(settings));
+    const deck = shuffle(roleDeck(settings));
     setPlayers((current) =>
       current.map((player, index) => {
         const role = deck[index] ?? "Koylu";
@@ -194,309 +178,241 @@ function App() {
       }),
     );
     setPhase("roles");
-    setEventLog((current) => ["Roller oyun tarafindan gizli olarak dagitildi.", ...current]);
+    setLog((current) => ["Roller dağıtıldı.", ...current]);
   }
 
   function startNight() {
     const vampires = players.filter((player) => player.alive && player.role === "Vampir");
-    const vampireTarget = chooseTarget(
+    const vampireTarget = pickTarget(
       players.filter((player) => player.team !== "vampir"),
       vampires[0]?.id,
     );
     const seer = players.find((player) => player.alive && player.role === "Kahin");
     const doctor = players.find((player) => player.alive && player.role === "Doktor");
-    const seerTarget = seer ? chooseTarget(players, seer.id) : undefined;
-    const doctorTarget = doctor ? chooseTarget(players) : undefined;
 
     setNightAction({
       vampireTargetId: vampireTarget?.id,
-      seerTargetId: seerTarget?.id,
-      doctorTargetId: doctorTarget?.id,
+      seerTargetId: seer ? pickTarget(players, seer.id)?.id : undefined,
+      doctorTargetId: doctor ? pickTarget(players)?.id : undefined,
     });
     setPhase("night");
-    setEventLog((current) => [
-      "Gece basladi: bot roller hedeflerini sessizce secti.",
-      ...current,
-    ]);
+    setLog((current) => ["Gece başladı.", ...current]);
   }
 
   function resolveNight() {
     const target = players.find((player) => player.id === nightAction.vampireTargetId);
     const protectedPlayer = players.find((player) => player.id === nightAction.doctorTargetId);
-    const targetDies = target && target.id !== protectedPlayer?.id;
+    const nextPlayers = players.map((player) =>
+      target && target.id !== protectedPlayer?.id && player.id === target.id ? { ...player, alive: false } : player,
+    );
 
-    if (targetDies) {
-      setPlayers((current) =>
-        current.map((player) => (player.id === target.id ? { ...player, alive: false } : player)),
-      );
-      setEliminatedId(target.id);
-      setEventLog((current) => [`Gece sonucu: ${target.name} elendi.`, ...current]);
-    } else {
-      setEliminatedId(undefined);
-      setEventLog((current) => ["Gece sonucu: Kimse elenmedi.", ...current]);
-    }
-    setPhase("day");
+    setPlayers(nextPlayers);
+    setEliminatedId(target && target.id !== protectedPlayer?.id ? target.id : undefined);
+    setPhase(getWinner(nextPlayers) ? "gameover" : "day");
+    setLog((current) => [target && target.id !== protectedPlayer?.id ? `${target.name} gece elendi.` : "Gece sakin geçti.", ...current]);
   }
 
   function startVoting() {
-    setPlayers((current) =>
-      current.map((player) => ({ ...player, voteLocked: false, voteTargetId: undefined })),
-    );
-    setPhase("vote");
-    setEventLog((current) => ["Oylama telefondan basladi; oylar kilitlenebilir.", ...current]);
-  }
-
-  function castVote(voterId: string, targetId: string) {
-    setPlayers((current) =>
-      current.map((player) =>
-        player.id === voterId && !player.voteLocked
-          ? { ...player, voteTargetId: targetId, voteLocked: true }
-          : player,
-      ),
-    );
-  }
-
-  function autoVoteBots() {
+    setSelectedVoteId(undefined);
     setPlayers((current) =>
       current.map((player) => {
-        if (player.isHuman || !player.alive || player.voteLocked) return player;
-        const target = chooseTarget(current, player.id);
-        return { ...player, voteTargetId: target?.id, voteLocked: Boolean(target) };
+        if (!player.alive) return { ...player, voteDone: false, voteTargetId: undefined };
+        if (player.isHuman) return { ...player, voteDone: false, voteTargetId: undefined };
+        const target = pickTarget(current, player.id);
+        return { ...player, voteDone: Boolean(target), voteTargetId: target?.id };
       }),
     );
-    setEventLog((current) => ["Botlar oylarini verdi ve kilitledi.", ...current]);
+    setPhase("vote");
+    setLog((current) => ["Oylama başladı.", ...current]);
   }
 
-  function resolveVote() {
-    const aliveVotes = players.filter((player) => player.alive && player.voteTargetId);
-    if (!aliveVotes.length) return;
-
-    const sorted = Object.entries(voteTallies).sort((a, b) => b[1] - a[1]);
-    const [targetId] = sorted[0];
-    const target = players.find((player) => player.id === targetId);
-    if (!target) return;
-
-    setPlayers((current) =>
-      current.map((player) => (player.id === target.id ? { ...player, alive: false } : player)),
+  function confirmHumanVote() {
+    if (!human || !selectedVoteId) return;
+    const nextPlayers = players.map((player) =>
+      player.id === human.id ? { ...player, voteDone: true, voteTargetId: selectedVoteId } : player,
     );
+    setPlayers(nextPlayers);
+    setPhase("voteReveal");
+    setLog((current) => [`${human.name} oyunu tamamladı.`, ...current]);
+    window.setTimeout(() => resolveVote(nextPlayers), 1800);
+  }
+
+  function resolveVote(sourcePlayers = players) {
+    const tallies = sourcePlayers.reduce<Record<string, number>>((acc, player) => {
+      if (player.voteTargetId) acc[player.voteTargetId] = (acc[player.voteTargetId] ?? 0) + 1;
+      return acc;
+    }, {});
+    const sorted = Object.entries(tallies).sort((a, b) => b[1] - a[1]);
+    const [targetId] = sorted[0] ?? [];
+    const target = sourcePlayers.find((player) => player.id === targetId);
+    if (!target) return;
+    const nextPlayers = sourcePlayers.map((player) => (player.id === target.id ? { ...player, alive: false } : player));
+    setPlayers(nextPlayers);
     setEliminatedId(target.id);
-    setEventLog((current) => [`Oylama sonucu: ${target.name} kilitli oylarla elendi.`, ...current]);
-    setPhase(winner ? "gameover" : "result");
+    setPhase(getWinner(nextPlayers) ? "gameover" : "result");
+    setLog((current) => [`${target.name} oylamayla elendi.`, ...current]);
   }
 
   function nextRound() {
-    if (winner) {
-      setPhase("gameover");
-      return;
-    }
     setRound((current) => current + 1);
     startNight();
   }
 
   function resetGame() {
     setPhase("setup");
-    setSettings(initialSettings);
     setPlayers([]);
-    setNightAction({});
-    setEliminatedId(undefined);
     setRound(1);
-    setEventLog(["Oyun kurulumu bekleniyor."]);
+    setNightAction({});
+    setSelectedVoteId(undefined);
+    setEliminatedId(undefined);
+    setLog(["Oyun hazır."]);
   }
 
   async function copyJoinUrl() {
     await navigator.clipboard.writeText(joinUrl);
     setJoinCopied(true);
-    window.setTimeout(() => setJoinCopied(false), 1400);
+    window.setTimeout(() => setJoinCopied(false), 1300);
   }
 
   return (
-    <main className="app-shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">Vampir Koylu / Yilbasi modu</p>
-          <h1>Telefonlardan girilen, QR destekli tur yonetim araci.</h1>
-          <p className="hero-copy">
-            Roller oyun tarafindan dagitilir, botlar demo modunda her asamayi oynar, telefondan
-            verilen oylar kilitlenir.
-          </p>
-        </div>
-        <div className="phase-card">
-          <span>Tur {round}</span>
-          <strong>{phaseLabel(phase)}</strong>
-          <small>{players.length ? `${alivePlayers.length}/${players.length} oyuncu hayatta` : "Oda bekliyor"}</small>
-        </div>
-      </section>
+    <main className="app">
+      <div className="phone-frame">
+        <header className="topbar">
+          <div className="brand">
+            <span>VK</span>
+            <div>
+              <strong>Vampir Köylü</strong>
+              <small>Tur {round} · {phaseLabel(phase)}</small>
+            </div>
+          </div>
+          {players.length > 0 && <span className="live-dot">{alivePlayers.length}/{players.length}</span>}
+        </header>
 
-      {phase === "setup" && (
-        <section className="grid two">
-          <div className="panel">
-            <SectionTitle icon={<Users />} title="Ilk giris" subtitle="Isim ve fotograf karti" />
-            <label className="field">
-              Ismin
-              <input value={playerName} onChange={(event) => setPlayerName(event.target.value)} />
-            </label>
-            <div className="profile-preview">
-              <img src={avatarFor(playerName || "Ev sahibi", 0)} alt="Oyuncu fotografi" />
+        {phase === "setup" && (
+          <Screen title="Oyunu kur" subtitle="Oyuncu sayısı, rol dağılımı ve profil.">
+            <div className="profile-card">
+              <img src={playerPhoto} alt="Profil" />
               <div>
-                <strong>{playerName || "Ev sahibi"}</strong>
-                <span>Dikdortgen oyuncu karti</span>
+                <label>İsim</label>
+                <input value={playerName} onChange={(event) => setPlayerName(event.target.value)} />
+                <label className="upload-button">
+                  <Upload size={17} />
+                  Fotoğraf seç
+                  <input type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files?.[0])} />
+                </label>
               </div>
             </div>
-          </div>
 
-          <div className="panel">
-            <SectionTitle icon={<Crown />} title="Rol sayilari" subtitle="Oyunun basinda belirlenir" />
-            <Counter label="Vampir" value={settings.vampireCount} min={1} max={4} onChange={(value) => updateSetting("vampireCount", value)} />
-            <Counter label="Koylu" value={settings.villagerCount} min={2} max={10} onChange={(value) => updateSetting("villagerCount", value)} />
-            <label className="toggle">
+            <div className="compact-grid">
+              <Counter label="Vampir" value={settings.vampireCount} min={1} max={4} onChange={(value) => updateSetting("vampireCount", value)} />
+              <Counter label="Köylü" value={settings.villagerCount} min={2} max={10} onChange={(value) => updateSetting("villagerCount", value)} />
+            </div>
+
+            <label className="switch">
               <input type="checkbox" checked={settings.seerEnabled} onChange={(event) => updateSetting("seerEnabled", event.target.checked)} />
-              Kahin rolunu ekle
+              Kahin
             </label>
-            <label className="toggle">
+            <label className="switch">
               <input type="checkbox" checked={settings.doctorEnabled} onChange={(event) => updateSetting("doctorEnabled", event.target.checked)} />
-              Doktor rolunu ekle
+              Doktor
             </label>
-            <div className="actions">
-              <button className="primary" onClick={() => startLobby(false)}>
-                Oda ac
-              </button>
-              <button className="secondary" onClick={() => startLobby(true)}>
-                <Bot size={18} /> Demo botlarla baslat
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
 
-      {phase === "lobby" && (
-        <section className="grid lobby-grid">
-          <div className="panel qr-panel">
-            <SectionTitle icon={<QrCode />} title="QR ile katilim" subtitle="Arkadaslar linki telefondan acar" />
-            <div className="fake-qr" aria-label="Demo QR kodu">
-              {Array.from({ length: 49 }).map((_, index) => (
-                <span key={index} className={(index * 7 + 3) % 5 === 0 ? "filled" : ""} />
-              ))}
+            <div className="action-stack">
+              <button className="button primary" onClick={() => startLobby(false)}>Oda aç</button>
+              <button className="button soft" onClick={() => startLobby(true)}><Bot size={18} /> Demo başlat</button>
             </div>
-            <p className="room-code">{gameCode}</p>
-            <button className="secondary full" onClick={copyJoinUrl}>
-              {joinCopied ? <Check size={18} /> : <Copy size={18} />}
-              {joinCopied ? "Kopyalandi" : "Katilim linkini kopyala"}
-            </button>
-          </div>
+          </Screen>
+        )}
 
-          <div className="panel">
-            <SectionTitle icon={<Smartphone />} title="Lobi" subtitle={`${players.length}/${totalPlayers} oyuncu`} />
-            <PlayerGrid players={players} selectable={false} />
-            <div className="actions">
-              <button className="secondary" disabled={players.length >= totalPlayers} onClick={addDemoBot}>
-                <Bot size={18} /> Demo bot ekle
-              </button>
-              <button className="primary" disabled={players.length < totalPlayers} onClick={assignRoles}>
-                Rolleri dagit
-              </button>
+        {phase === "lobby" && (
+          <Screen title="Oda hazır" subtitle={`${players.length}/${requiredPlayers} oyuncu`}>
+            <div className="join-card">
+              <div className="qr" aria-label="QR demo">
+                {Array.from({ length: 25 }).map((_, index) => <span key={index} />)}
+              </div>
+              <div>
+                <small>Oda kodu</small>
+                <strong>{gameCode}</strong>
+                <button className="tiny-button" onClick={copyJoinUrl}>{joinCopied ? <Check size={15} /> : <Copy size={15} />} Link</button>
+              </div>
             </div>
-          </div>
-        </section>
-      )}
+            <PlayerList players={players} />
+            <div className="action-stack">
+              <button className="button soft" disabled={players.length >= requiredPlayers} onClick={addDemoBot}><Bot size={18} /> Bot ekle</button>
+              <button className="button primary" disabled={players.length < requiredPlayers} onClick={assignRoles}>Rolleri dağıt</button>
+            </div>
+          </Screen>
+        )}
 
-      {phase === "roles" && human?.role && (
-        <section className="grid two">
-          <div className="panel role-reveal">
-            <SectionTitle icon={<Sparkles />} title="Gizli rolun" subtitle="Telefonu kendine cevir" />
+        {phase === "roles" && human?.role && (
+          <Screen title="Rolün" subtitle="Telefonu sadece sen gör.">
             <div className={`role-card ${human.team}`}>
               <span>{human.role}</span>
-              <strong>{roleMeta[human.role].hint}</strong>
+              <p>{roleMeta[human.role].hint}</p>
             </div>
-            <button className="primary full" onClick={startNight}>
-              Geceyi baslat
-            </button>
-          </div>
-          <div className="panel">
-            <SectionTitle icon={<Users />} title="Oyuncular" subtitle="Roller gizli kalir" />
-            <PlayerGrid players={players} selectable={false} hideRoles />
-          </div>
-        </section>
-      )}
+            <PlayerList players={players} hideRoles />
+            <button className="button primary bottom" onClick={startNight}><Moon size={18} /> Geceye geç</button>
+          </Screen>
+        )}
 
-      {phase === "night" && (
-        <section className="grid two">
-          <div className="panel">
-            <SectionTitle icon={<Moon />} title="Gece aksiyonlari" subtitle="Botlar hedeflerini secti" />
+        {phase === "night" && (
+          <Screen title="Gece" subtitle="Demo oyuncuları aksiyonlarını seçti.">
             <NightSummary players={players} action={nightAction} />
-            <button className="primary full" onClick={resolveNight}>
-              Geceyi cozumle
-            </button>
-          </div>
-          <EventPanel events={eventLog} />
-        </section>
-      )}
+            <button className="button primary bottom" onClick={resolveNight}>Sabahı aç</button>
+          </Screen>
+        )}
 
-      {phase === "day" && (
-        <section className="grid two">
-          <div className="panel day-panel">
-            <SectionTitle icon={<Sun />} title="Gunduz tartismasi" subtitle="Sistem sonucu duyurur" />
-            <div className="announcement">
-              {eliminated ? `${eliminated.name} gece elendi.` : "Bu gece kimse elenmedi."}
-            </div>
-            <PlayerGrid players={players} selectable={false} hideRoles />
-            <button className="primary full" onClick={startVoting}>
-              Telefonda oylamaya gec
-            </button>
-          </div>
-          <EventPanel events={eventLog} />
-        </section>
-      )}
+        {phase === "day" && (
+          <Screen title="Gündüz" subtitle="Konuşma zamanı.">
+            <div className="announcement">{eliminated ? `${eliminated.name} bu gece elendi.` : "Bu gece kimse elenmedi."}</div>
+            <PlayerList players={players} hideRoles />
+            <button className="button primary bottom" onClick={startVoting}><Vote size={18} /> Oylamaya geç</button>
+          </Screen>
+        )}
 
-      {phase === "vote" && human && (
-        <section className="grid two">
-          <div className="panel">
-            <SectionTitle icon={<Vote />} title="Kilitli telefon oylamasi" subtitle="Oy verildikten sonra degismez" />
-            <PlayerGrid
-              players={players.filter((player) => player.alive && player.id !== human.id)}
-              selectable={!human.voteLocked}
-              voteTallies={voteTallies}
-              onSelect={(targetId) => castVote(human.id, targetId)}
-              hideRoles
-            />
-            <div className="vote-status">
-              <Lock size={18} />
-              {human.voteLocked ? "Oyun kilitlendi." : "Bir oyuncu secince oyun kilitlenecek."}
-            </div>
-            <div className="actions">
-              <button className="secondary" onClick={autoVoteBots}>
-                <Bot size={18} /> Botlara oy verdir
-              </button>
-              <button className="primary" onClick={resolveVote}>
-                Oylamayi bitir
-              </button>
-            </div>
-          </div>
-          <EventPanel events={eventLog} />
-        </section>
-      )}
-
-      {(phase === "result" || phase === "gameover") && (
-        <section className="grid two">
-          <div className="panel">
-            <SectionTitle icon={<Crown />} title={phase === "gameover" ? "Oyun bitti" : "Tur sonucu"} subtitle="Roller guvenli sekilde acilir" />
-            <div className="announcement">
-              {winner ?? `${eliminated?.name ?? "Kimse"} oylama ile elendi.`}
-            </div>
-            <PlayerGrid players={players} selectable={false} />
-            <div className="actions">
-              {phase !== "gameover" && (
-                <button className="primary" onClick={nextRound}>
-                  Sonraki gece
+        {phase === "vote" && human && (
+          <Screen title="Oylama" subtitle="Bir fotoğraf seç, sonra oyunu tamamla.">
+            <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
+            <div className="vote-grid">
+              {alivePlayers.filter((player) => player.id !== human.id).map((player) => (
+                <button
+                  key={player.id}
+                  className={`vote-card ${selectedVoteId === player.id ? "selected" : ""}`}
+                  disabled={human.voteDone}
+                  onClick={() => setSelectedVoteId(player.id)}
+                >
+                  <img src={player.photo} alt={player.name} />
+                  <strong>{player.name}</strong>
+                  {voteTallies[player.id] ? <small>{voteTallies[player.id]} oy</small> : <small>Seçilebilir</small>}
                 </button>
-              )}
-              <button className="secondary" onClick={resetGame}>
-                <RotateCcw size={18} /> Yeni oyun
-              </button>
+              ))}
             </div>
-          </div>
-          <EventPanel events={eventLog} />
-        </section>
-      )}
+            <button className="button primary bottom" disabled={!selectedVoteId || human.voteDone} onClick={confirmHumanVote}>
+              {human.voteDone ? "Oy tamamlandı" : "Oyumu tamamla"}
+            </button>
+          </Screen>
+        )}
+
+        {phase === "voteReveal" && (
+          <Screen title="Sonuç geliyor" subtitle="Tüm oylar tamamlandı.">
+            <VoteProgress done={votersDone} pending={pendingVoters} total={alivePlayers.length} />
+            <div className="announcement pulse">Oylar sayılıyor...</div>
+          </Screen>
+        )}
+
+        {(phase === "result" || phase === "gameover") && (
+          <Screen title={phase === "gameover" ? "Oyun bitti" : "Sonuç"} subtitle={winner ?? "Tur tamamlandı."}>
+            <div className="announcement">{winner ?? `${eliminated?.name ?? "Kimse"} elendi.`}</div>
+            <PlayerList players={players} />
+            <div className="action-stack">
+              {phase !== "gameover" && <button className="button primary" onClick={nextRound}><Sun size={18} /> Sonraki tur</button>}
+              <button className="button soft" onClick={resetGame}><RotateCcw size={18} /> Yeni oyun</button>
+            </div>
+          </Screen>
+        )}
+
+        <Log events={log} />
+      </div>
     </main>
   );
 }
@@ -505,41 +421,30 @@ function phaseLabel(phase: Phase) {
   const labels: Record<Phase, string> = {
     setup: "Kurulum",
     lobby: "Lobi",
-    roles: "Rol dagitimi",
+    roles: "Rol",
     night: "Gece",
-    day: "Gunduz",
+    day: "Gündüz",
     vote: "Oylama",
-    result: "Sonuc",
-    gameover: "Oyun sonu",
+    voteReveal: "Sayım",
+    result: "Sonuç",
+    gameover: "Bitti",
   };
   return labels[phase];
 }
 
-function SectionTitle({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
+function Screen({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <div className="section-title">
-      <div className="icon">{icon}</div>
-      <div>
-        <h2>{title}</h2>
+    <section className="screen">
+      <div className="screen-title">
+        <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
-    </div>
+      {children}
+    </section>
   );
 }
 
-function Counter({
-  label,
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
-}) {
+function Counter({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
   return (
     <div className="counter">
       <span>{label}</span>
@@ -552,66 +457,57 @@ function Counter({
   );
 }
 
-function PlayerGrid({
-  players,
-  selectable,
-  hideRoles,
-  voteTallies,
-  onSelect,
-}: {
-  players: Player[];
-  selectable: boolean;
-  hideRoles?: boolean;
-  voteTallies?: Record<string, number>;
-  onSelect?: (playerId: string) => void;
-}) {
+function PlayerList({ players, hideRoles }: { players: Player[]; hideRoles?: boolean }) {
   return (
-    <div className="player-grid">
-      {players.map((player, index) => (
-        <button
-          key={player.id}
-          className={`player-card ${!player.alive ? "dead" : ""}`}
-          onClick={() => selectable && onSelect?.(player.id)}
-          disabled={!selectable}
-          style={{ "--fallback": photoGradients[index % photoGradients.length] } as React.CSSProperties}
-        >
-          <img src={player.photo} alt={`${player.name} fotografi`} />
+    <div className="player-list">
+      {players.map((player) => (
+        <article key={player.id} className={`player-row ${!player.alive ? "dead" : ""}`}>
+          <img src={player.photo} alt={player.name} />
           <div>
             <strong>{player.name}</strong>
-            <span>
-              {!player.alive ? "Elendi" : player.isHuman ? "Telefon oyuncusu" : "Demo bot"}
-              {voteTallies?.[player.id] ? ` · ${voteTallies[player.id]} oy` : ""}
-            </span>
-            {!hideRoles && player.role && <em>{player.role}</em>}
+            <small>{!player.alive ? "Elendi" : player.isHuman ? "Oyuncu" : "Demo"}</small>
           </div>
-        </button>
+          {!hideRoles && player.role && <span>{player.role}</span>}
+        </article>
       ))}
     </div>
   );
 }
 
-function NightSummary({ players, action }: { players: Player[]; action: NightAction }) {
-  const name = (id?: string) => players.find((player) => player.id === id)?.name ?? "Secilmedi";
+function VoteProgress({ done, pending, total }: { done: Player[]; pending: Player[]; total: number }) {
   return (
-    <div className="night-summary">
-      <p>Vampir hedefi: {name(action.vampireTargetId)}</p>
-      <p>Kahin baktigi kisi: {name(action.seerTargetId)}</p>
-      <p>Doktor korumasi: {name(action.doctorTargetId)}</p>
-      <small>Canli urunde bu detaylar sadece yetkili oyuncu payload'inda tutulacak.</small>
+    <div className="vote-progress">
+      <div>
+        <strong>{done.length}/{total}</strong>
+        <small>oy tamamlandı</small>
+      </div>
+      <div className="voter-cloud">
+        {done.map((player) => <span className="done" key={player.id}>{player.name}</span>)}
+        {pending.map((player) => <span key={player.id}>{player.name}</span>)}
+      </div>
     </div>
   );
 }
 
-function EventPanel({ events }: { events: string[] }) {
+function NightSummary({ players, action }: { players: Player[]; action: NightAction }) {
+  const name = (id?: string) => players.find((player) => player.id === id)?.name ?? "Yok";
   return (
-    <div className="panel event-panel">
-      <SectionTitle icon={<Sparkles />} title="Olay akisi" subtitle="Test icin canli log" />
-      <ul>
-        {events.map((event, index) => (
-          <li key={`${event}-${index}`}>{event}</li>
-        ))}
-      </ul>
+    <div className="night-card">
+      <Moon />
+      <div>
+        <strong>Gece aksiyonları hazır</strong>
+        <small>Demo görünümü: Vampir {name(action.vampireTargetId)}, Kahin {name(action.seerTargetId)}, Doktor {name(action.doctorTargetId)}</small>
+      </div>
     </div>
+  );
+}
+
+function Log({ events }: { events: string[] }) {
+  return (
+    <aside className="log">
+      <Sparkles size={16} />
+      <span>{events[0]}</span>
+    </aside>
   );
 }
 
