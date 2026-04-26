@@ -265,11 +265,20 @@ function App() {
   }, [applyRoomState, roomCode]);
 
   function sendCommand(payload: Record<string, unknown>) {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) {
-      setLog(["Bağlantı hazır değil. Birkaç saniye sonra tekrar dene."]);
-      return false;
+    const command = { ...payload, room: roomCode, clientId: clientIdRef.current };
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(command));
+      return true;
     }
-    wsRef.current.send(JSON.stringify({ ...payload, room: roomCode, clientId: clientIdRef.current }));
+
+    void fetch("/api/room-command", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(command),
+    })
+      .then((response) => response.json() as Promise<{ state: RoomState | null }>)
+      .then((payload) => applyRoomState(payload.state))
+      .catch(() => setLog(["Bağlantı kurulamadı. Tekrar dene."]));
     return true;
   }
 
